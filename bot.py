@@ -1,9 +1,11 @@
+# bot.py — Fixed for python-telegram-bot v20.3 + Flask + Render
 import os
 import re
 import json
 import logging
 import urllib.parse
 import requests
+import asyncio
 from flask import Flask, request
 
 from telegram import (
@@ -21,31 +23,30 @@ from telegram.ext import (
 
 # ================== CONFIG =====================
 
-BOT_TOKEN = "8285505523:AAEoJgpBpVeUEErcseSSeCIEb0MwNAZ_5qM"
-WEBHOOK_URL = "https://advance-osint-zii6.onrender.com"
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8285505523:AAEoJgpBpVeUEErcseSSeCIEb0MwNAZ_5qM")
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "https://advance-osint-zii6.onrender.com")
 
-API_KEY = "6947973020:AvQVz5tN"
-LEAK_API = "https://leakosintapi.com/"
-FAMILY_API = "https://encore.toxictanji0503.workers.dev/family?id="
+API_KEY = os.environ.get("API_KEY", "6947973020:AvQVz5tN")
+LEAK_API = os.environ.get("LEAK_API", "https://leakosintapi.com/")
+FAMILY_API = os.environ.get("FAMILY_API", "https://encore.toxictanji0503.workers.dev/family?id=")
 
 LANG = "ru"
 LIMIT = 300
 
 UPI_ID = "durgeshraihero@oksbi"
 QR_IMAGE = "https://i.ibb.co/S6nfK15/upi.jpg"
-ADMIN_ID = 6314556756
+ADMIN_ID = int(os.environ.get("ADMIN_ID", "6314556756"))
 
 COST_LOOKUP = 50
 COST_FAMILY = 20
 COST_TRACK = 10
 
-RENDER_LINK = "https://jsjs-kzua.onrender.com"
+RENDER_LINK = os.environ.get("RENDER_LINK", "https://jsjs-kzua.onrender.com")
 
 user_balances = {}
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
 
 # ================== FLASK APP =====================
 
@@ -67,13 +68,14 @@ def health():
 def webhook():
     global telegram_app
     if telegram_app is None:
-        return "Bot not ready"
+        return "Bot not ready", 503
 
     try:
         update = Update.de_json(request.get_json(force=True), telegram_app.bot)
+        # schedule processing of the update on the application's loop
         telegram_app.create_task(telegram_app.process_update(update))
     except Exception as e:
-        logger.error(f"WEBHOOK ERROR: {e}")
+        logger.exception(f"WEBHOOK ERROR: {e}")
 
     return "OK"
 
@@ -86,19 +88,23 @@ def chunk(text, size=3500):
 
 def normalize_phone(txt):
     s = re.sub(r"[^0-9]", "", txt)
-    if len(s) == 10: return "+91" + s
-    if len(s) == 11 and s.startswith("0"): return "+91" + s[1:]
-    if len(s) == 12 and s.startswith("91"): return "+" + s
-    if len(s) == 13 and s.startswith("+91"): return s
+    if len(s) == 10:
+        return "+91" + s
+    if len(s) == 11 and s.startswith("0"):
+        return "+91" + s[1:]
+    if len(s) == 12 and s.startswith("91"):
+        return "+" + s
+    if len(s) == 13 and s.startswith("+91"):
+        return s
     return None
 
 
 def google_maps_link(address):
-    return "https://www.google.com/maps/search/" + urllib.parse.quote(address)
+    return "https://www.google.com/maps/search/" + urllib.parse.quote(address or "")
 
 
 def whatsapp_check(number):
-    return f"https://wa.me/{number.replace('+','')}"
+    return f"https://wa.me/{number.replace('+','')}" if number else ""
 
 
 def make_tracking_link(uid, site):
@@ -109,12 +115,16 @@ def make_tracking_link(uid, site):
 
 def leak_raw(query):
     try:
-        r = requests.post(LEAK_API, json={
-            "token": API_KEY,
-            "request": query,
-            "limit": LIMIT,
-            "lang": LANG
-        }, timeout=20)
+        r = requests.post(
+            LEAK_API,
+            json={
+                "token": API_KEY,
+                "request": query,
+                "limit": LIMIT,
+                "lang": LANG
+            },
+            timeout=20
+        )
         return r.json()
     except Exception as e:
         return {"error": str(e)}
@@ -143,7 +153,8 @@ def format_lookup(entry):
     for k, v in entry.items():
         if "phone" in k.lower() and v:
             p = str(v)
-            if len(p) == 10: p = "+91" + p
+            if len(p) == 10:
+                p = "+91" + p
             phones.append(p)
 
     phone_block = "\n".join([f"• {p}" for p in phones]) or "Not Available"
@@ -168,7 +179,7 @@ def format_list(raw):
     out = "📱 <b>Phone Intelligence Report</b>\n━━━━━━━━━━━━━━━━━━\n\n"
     for db_name, block in raw.get("List", {}).items():
         out += f"🗂 <b>Database:</b> {db_name}\n"
-        for i, entry in enumerate(block["Data"], 1):
+        for i, entry in enumerate(block.get("Data", []), 1):
             name = (entry.get("FatherName") or "N/A").title()
             father = (entry.get("FullName") or "N/A").title()
             address = entry.get("Address", "")
@@ -180,7 +191,8 @@ def format_list(raw):
             for k, v in entry.items():
                 if "phone" in k.lower() and v:
                     p = str(v)
-                    if len(p) == 10: p = "+91" + p
+                    if len(p) == 10:
+                        p = "+91" + p
                     phones.append(p)
 
             phone_block = "\n".join([f"• {p}" for p in phones]) or "Not Available"
@@ -225,13 +237,21 @@ def format_family(data):
 # ================== SAFE SENDERS =====================
 
 async def safe_reply(update, text, **kwargs):
-    chat = update.message or update.callback_query.message
-    return await chat.reply_text(text, **kwargs)
+    chat = update.message or (update.callback_query and update.callback_query.message)
+    if chat:
+        return await chat.reply_text(text, **kwargs)
+    else:
+        logger.warning("safe_reply: no chat found for update")
+        return None
 
 
 async def safe_photo(update, photo, **kwargs):
-    chat = update.message or update.callback_query.message
-    return await chat.reply_photo(photo, **kwargs)
+    chat = update.message or (update.callback_query and update.callback_query.message)
+    if chat:
+        return await chat.reply_photo(photo, **kwargs)
+    else:
+        logger.warning("safe_photo: no chat found for update")
+        return None
 
 
 # ================== COMMANDS =====================
@@ -274,11 +294,12 @@ async def approve(update, context):
     if update.effective_user.id != ADMIN_ID:
         return await safe_reply(update, "❌ Unauthorized.")
     try:
-        uid = int(context.args[0])
-        amt = int(context.args[1])
+        args = context.args or []
+        uid = int(args[0])
+        amt = int(args[1])
         user_balances[uid] = user_balances.get(uid, 0) + amt
         await safe_reply(update, f"✔ Added {amt} credits to {uid}")
-    except:
+    except Exception:
         await safe_reply(update, "Usage: /approve <id> <amt>")
 
 
@@ -307,7 +328,7 @@ async def button(update: Update, context):
 
 async def handle_message(update: Update, context):
     uid = update.effective_user.id
-    text = update.message.text.strip()
+    text = (update.message.text or "").strip()
 
     phone_auto = normalize_phone(text)
     email_auto = re.fullmatch(r"[\w.-]+@[\w.-]+\.\w+", text)
@@ -362,7 +383,7 @@ async def handle_message(update: Update, context):
                 await safe_reply(update, c, parse_mode="HTML")
             return
 
-        pretty = "<pre>" + json.dumps(raw, indent=2) + "</pre>"
+        pretty = "<pre>" + json.dumps(raw, indent=2, ensure_ascii=False) + "</pre>"
         for c in chunk(pretty):
             await safe_reply(update, c, parse_mode="HTML")
         return
@@ -383,6 +404,19 @@ async def handle_message(update: Update, context):
     await safe_reply(update, "Use /start to open menu.")
 
 
+# ================== WEBHOOK SETUP (async) =====================
+
+async def setup_webhook(app_obj):
+    webhook_url = f"{WEBHOOK_URL.rstrip('/')}/webhook"
+    try:
+        # drop_pending_updates True ensures old updates don't pile up when redeploying
+        await app_obj.bot.delete_webhook(drop_pending_updates=True)
+        await app_obj.bot.set_webhook(webhook_url)
+        logger.info(f"Webhook SET: {webhook_url}")
+    except Exception as e:
+        logger.exception(f"Webhook setup error: {e}")
+
+
 # ================== MAIN =====================
 
 def main():
@@ -397,16 +431,13 @@ def main():
     telegram_app.add_handler(CallbackQueryHandler(button))
     telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    # SET WEBHOOK HERE (NO POLLING)
+    # Set webhook asynchronously BEFORE starting Flask server
     try:
-        telegram_app.bot.delete_webhook()
-        webhook_url = f"{WEBHOOK_URL}/webhook"
-        telegram_app.bot.set_webhook(webhook_url)
-        logger.info(f"Webhook SET: {webhook_url}")
-    except Exception as e:
-        logger.error(f"Webhook Error: {e}")
+        asyncio.run(setup_webhook(telegram_app))
+    except Exception:
+        logger.exception("Failed to set webhook during startup.")
 
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
 
 
