@@ -1,4 +1,4 @@
-# bot.py — Fixed for python-telegram-bot v20.3 + Flask + Render
+# bot.py — PTB v20.3 + Flask + Render (background asyncio loop)
 import os
 import re
 import json
@@ -6,6 +6,7 @@ import logging
 import urllib.parse
 import requests
 import asyncio
+import threading
 from flask import Flask, request
 
 from telegram import (
@@ -52,6 +53,7 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 telegram_app = None
+telegram_loop = None  # background loop reference
 
 
 @app.route("/")
@@ -66,18 +68,20 @@ def health():
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    global telegram_app
-    if telegram_app is None:
+    """Receive Telegram update from webhook (Flask thread) and forward it to PTB loop."""
+    global telegram_app, telegram_loop
+    if telegram_app is None or telegram_loop is None:
         return "Bot not ready", 503
 
     try:
         update = Update.de_json(request.get_json(force=True), telegram_app.bot)
-        # schedule processing of the update on the application's loop
-        telegram_app.create_task(telegram_app.process_update(update))
+        # schedule processing on the background loop
+        future = asyncio.run_coroutine_threadsafe(telegram_app.process_update(update), telegram_loop)
+        # optionally wait a short time if you want to ensure it was scheduled (not required)
+        return "OK"
     except Exception as e:
         logger.exception(f"WEBHOOK ERROR: {e}")
-
-    return "OK"
+        return "OK", 200
 
 
 # ================== HELPERS =====================
@@ -404,23 +408,50 @@ async def handle_message(update: Update, context):
     await safe_reply(update, "Use /start to open menu.")
 
 
-# ================== WEBHOOK SETUP (async) =====================
+# ================== TELEGRAM BACKGROUND LOOP =====================
 
-async def setup_webhook(app_obj):
-    webhook_url = f"{WEBHOOK_URL.rstrip('/')}/webhook"
-    try:
-        # drop_pending_updates True ensures old updates don't pile up when redeploying
-        await app_obj.bot.delete_webhook(drop_pending_updates=True)
-        await app_obj.bot.set_webhook(webhook_url)
-        logger.info(f"Webhook SET: {webhook_url}")
-    except Exception as e:
-        logger.exception(f"Webhook setup error: {e}")
+def start_telegram_background(app_obj):
+    """
+    Create a dedicated asyncio loop in a background thread, initialize PTB application,
+    set webhook and start the application. Returns the loop object.
+    """
+    loop = asyncio.new_event_loop()
+
+    def _run():
+        asyncio.set_event_loop(loop)
+        try:
+            # initialize the application (loads handlers, etc.)
+            loop.run_until_complete(app_obj.initialize())
+
+            # set webhook on the bot in this loop
+            webhook_url = f"{WEBHOOK_URL.rstrip('/')}/webhook"
+            loop.run_until_complete(app_obj.bot.delete_webhook(drop_pending_updates=True))
+            loop.run_until_complete(app_obj.bot.set_webhook(webhook_url))
+            logger.info(f"Webhook SET: {webhook_url}")
+
+            # start the application (this starts the dispatcher and job queue etc.)
+            loop.create_task(app_obj.start())
+
+            # keep the loop running forever to serve tasks scheduled via run_coroutine_threadsafe(...)
+            loop.run_forever()
+        except Exception:
+            logger.exception("Exception in telegram background loop")
+        finally:
+            try:
+                loop.run_until_complete(app_obj.stop())
+                loop.run_until_complete(app_obj.shutdown())
+            except Exception:
+                pass
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    return loop
 
 
 # ================== MAIN =====================
 
 def main():
-    global telegram_app
+    global telegram_app, telegram_loop
 
     telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
 
@@ -431,12 +462,14 @@ def main():
     telegram_app.add_handler(CallbackQueryHandler(button))
     telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    # Set webhook asynchronously BEFORE starting Flask server
+    # start telegram application in background loop (this also sets webhook)
     try:
-        asyncio.run(setup_webhook(telegram_app))
+        telegram_loop = start_telegram_background(telegram_app)
     except Exception:
-        logger.exception("Failed to set webhook during startup.")
+        logger.exception("Failed to start telegram background loop.")
+        telegram_loop = None
 
+    # start Flask (synchronous) to receive webhooks
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
 
