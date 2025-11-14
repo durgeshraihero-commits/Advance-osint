@@ -5,7 +5,6 @@ import logging
 import urllib.parse
 import requests
 from flask import Flask, request
-from threading import Thread
 
 from telegram import (
     Update,
@@ -17,14 +16,13 @@ from telegram.ext import (
     CommandHandler,
     MessageHandler,
     CallbackQueryHandler,
-    ContextTypes,
     filters,
 )
 
-
 # ================== CONFIG =====================
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8285505523:AAEoJgpBpVeUEErcseSSeCIEb0MwNAZ_5qM")
+BOT_TOKEN = "8285505523:AAEoJgpBpVeUEErcseSSeCIEb0MwNAZ_5qM"
+WEBHOOK_URL = "https://advance-osint-zii6.onrender.com"
 
 API_KEY = "6947973020:AvQVz5tN"
 LEAK_API = "https://leakosintapi.com/"
@@ -40,8 +38,6 @@ ADMIN_ID = 6314556756
 COST_LOOKUP = 50
 COST_FAMILY = 20
 COST_TRACK = 10
-
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "https://your-render-url.onrender.com")
 
 RENDER_LINK = "https://jsjs-kzua.onrender.com"
 
@@ -71,18 +67,15 @@ def health():
 def webhook():
     global telegram_app
     if telegram_app is None:
-        return "Not Ready"
+        return "Bot not ready"
+
     try:
         update = Update.de_json(request.get_json(force=True), telegram_app.bot)
         telegram_app.create_task(telegram_app.process_update(update))
     except Exception as e:
-        logger.error(f"Webhook error: {e}")
+        logger.error(f"WEBHOOK ERROR: {e}")
+
     return "OK"
-
-
-def run_flask():
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)
 
 
 # ================== HELPERS =====================
@@ -289,8 +282,6 @@ async def approve(update, context):
         await safe_reply(update, "Usage: /approve <id> <amt>")
 
 
-# ================== BUTTON HANDLER =====================
-
 async def button(update: Update, context):
     q = update.callback_query
     await q.answer()
@@ -314,19 +305,16 @@ async def button(update: Update, context):
         return await balance(update, context)
 
 
-# ================== MESSAGE HANDLER =====================
-
 async def handle_message(update: Update, context):
     uid = update.effective_user.id
     text = update.message.text.strip()
 
-    # Auto detect
     phone_auto = normalize_phone(text)
     email_auto = re.fullmatch(r"[\w.-]+@[\w.-]+\.\w+", text)
+
     if phone_auto or email_auto:
         context.user_data["lookup"] = True
 
-    # LOOKUP
     if context.user_data.pop("lookup", False):
         phone = normalize_phone(text)
         email = email_auto
@@ -344,19 +332,21 @@ async def handle_message(update: Update, context):
 
         if isinstance(raw, dict) and any(k in raw for k in ["FullName", "FatherName", "Address"]):
             msg = format_lookup(raw)
-            for c in chunk(msg): await safe_reply(update, c, parse_mode="HTML")
+            for c in chunk(msg):
+                await safe_reply(update, c, parse_mode="HTML")
             return
 
         if "List" in raw:
             msg = format_list(raw)
-            for c in chunk(msg): await safe_reply(update, c, parse_mode="HTML")
+            for c in chunk(msg):
+                await safe_reply(update, c, parse_mode="HTML")
             return
 
         pretty = "<pre>" + json.dumps(raw, indent=2, ensure_ascii=False) + "</pre>"
-        for c in chunk(pretty): await safe_reply(update, c, parse_mode="HTML")
+        for c in chunk(pretty):
+            await safe_reply(update, c, parse_mode="HTML")
         return
 
-    # FAMILY
     if context.user_data.pop("family", False):
         if user_balances.get(uid, 0) < COST_FAMILY:
             return await safe_reply(update, "❌ Not enough credits.")
@@ -365,29 +355,31 @@ async def handle_message(update: Update, context):
         await safe_reply(update, "⏳ Fetching family info...")
 
         raw = family_raw(text)
+
         if "memberDetailsList" in raw:
             msg = format_family(raw)
-            for c in chunk(msg): await safe_reply(update, c, parse_mode="HTML")
+            for c in chunk(msg):
+                await safe_reply(update, c, parse_mode="HTML")
             return
 
         pretty = "<pre>" + json.dumps(raw, indent=2) + "</pre>"
-        for c in chunk(pretty): await safe_reply(update, c, parse_mode="HTML")
+        for c in chunk(pretty):
+            await safe_reply(update, c, parse_mode="HTML")
         return
 
-    # TRACK
     if context.user_data.pop("track", False):
         if user_balances.get(uid, 0) < COST_TRACK:
             return await safe_reply(update, "❌ Not enough credits.")
 
         user_balances[uid] -= COST_TRACK
         link = make_tracking_link(uid, text)
+
         return await safe_reply(
             update,
             f"🔗 Your Tracking Link:\n<code>{link}</code>",
             parse_mode="HTML"
         )
 
-    # Default response
     await safe_reply(update, "Use /start to open menu.")
 
 
@@ -395,6 +387,7 @@ async def handle_message(update: Update, context):
 
 def main():
     global telegram_app
+
     telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     telegram_app.add_handler(CommandHandler("start", start))
@@ -404,17 +397,17 @@ def main():
     telegram_app.add_handler(CallbackQueryHandler(button))
     telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    # Set webhook
+    # SET WEBHOOK HERE (NO POLLING)
     try:
+        telegram_app.bot.delete_webhook()
         webhook_url = f"{WEBHOOK_URL}/webhook"
         telegram_app.bot.set_webhook(webhook_url)
-        logger.info(f"Webhook set to: {webhook_url}")
+        logger.info(f"Webhook SET: {webhook_url}")
     except Exception as e:
-        logger.error("Webhook error:", exc_info=e)
+        logger.error(f"Webhook Error: {e}")
 
-    Thread(target=run_flask, daemon=True).start()
-
-    telegram_app.run_polling()
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
 
 
 if __name__ == "__main__":
