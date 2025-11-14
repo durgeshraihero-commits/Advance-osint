@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: advance-osint
+    env: python
+    runtime: python3.11
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    autoDeploy: true
+    envVars:
+      - key: BOT_TOKEN
+        value: 8285505523:AAEoJgpBpVeUEErcseSSeCIEb0MwNAZ_5qM
+      - key: WEBHOOK_URL
+        value: https://advance-osint-zii6.onrender.com
