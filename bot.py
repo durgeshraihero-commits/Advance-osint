@@ -228,12 +228,6 @@ def normalize_phone(txt):
         return s
     return None
 
-def google_maps_link(address):
-    return "https://www.google.com/maps/search/" + urllib.parse.quote(address or "")
-
-def whatsapp_check(number):
-    return f"https://wa.me/{number.replace('+','')}" if number else ""
-
 # ================== API CALLS =====================
 
 def leak_raw(query):
@@ -259,98 +253,49 @@ def family_raw(fid):
     except Exception as e:
         return {"error": str(e)}
 
-# ================== FORMATTERS =====================
+# ================== SIMPLE FORMATTERS =====================
 
-def format_lookup(entry):
-    name = (entry.get("FatherName") or "Not Available").title()
-    father = (entry.get("FullName") or "Not Available").title()
+def swap_father_fullname(data):
+    """Swap FatherName with FullName in the data"""
+    if isinstance(data, dict):
+        # Create a copy to avoid modifying original
+        result = data.copy()
+        
+        # Swap the values if both keys exist
+        if 'FatherName' in result and 'FullName' in result:
+            father_name = result['FatherName']
+            full_name = result['FullName']
+            result['FatherName'] = full_name
+            result['FullName'] = father_name
+        
+        # Recursively process nested dictionaries
+        for key, value in result.items():
+            result[key] = swap_father_fullname(value)
+            
+        return result
+    
+    elif isinstance(data, list):
+        # Process each item in the list
+        return [swap_father_fullname(item) for item in data]
+    
+    else:
+        # Return unchanged for other data types
+        return data
 
-    address = entry.get("Address", "")
-    maps = google_maps_link(address)
-    region = (entry.get("Region", "")).replace(";", " / ")
-    doc = entry.get("DocNumber", "Not Available")
+def format_raw_output(data):
+    """Format raw API output with FatherName/FullName swap"""
+    # First swap the names
+    swapped_data = swap_father_fullname(data)
+    
+    # Convert to pretty JSON
+    pretty_json = json.dumps(swapped_data, indent=2, ensure_ascii=False)
+    
+    return f"<pre>{pretty_json}</pre>"
 
-    phones = []
-    for k, v in entry.items():
-        if "phone" in k.lower() and v:
-            p = str(v)
-            if len(p) == 10:
-                p = "+91" + p
-            phones.append(p)
-
-    phone_block = "\n".join([f"• {p}" for p in phones]) or "Not Available"
-    wa = whatsapp_check(phones[0]) if phones else ""
-
-    return (
-        "📋 <b>Search Results</b>\n"
-        "────────────────────\n\n"
-        f"👤 <b>Name:</b> {name}\n"
-        f"👨‍👦 <b>Father's Name:</b> {father}\n\n"
-        f"🏠 <b>Address:</b>\n{address}\n\n"
-        f"🗺️ <b>Map Location:</b> <a href='{maps}'>View on Google Maps</a>\n\n"
-        f"🌍 <b>Area:</b> {region}\n\n"
-        f"📞 <b>Phone Numbers:</b>\n{phone_block}\n\n"
-        f"💬 <b>WhatsApp:</b> <a href='{wa}'>Send Message</a>\n\n"
-        f"🆔 <b>Document:</b> {doc}\n"
-        "────────────────────"
-    )
-
-def format_list(raw):
-    out = "📋 <b>Search Results</b>\n────────────────────\n\n"
-    for db_name, block in raw.get("List", {}).items():
-        out += f"📊 <b>Source:</b> {db_name}\n"
-        for i, entry in enumerate(block.get("Data", []), 1):
-            name = (entry.get("FatherName") or "Not Available").title()
-            father = (entry.get("FullName") or "Not Available").title()
-            address = entry.get("Address", "")
-            region = (entry.get("Region", "")).replace(";", " / ")
-            maps = google_maps_link(address)
-            doc = entry.get("DocNumber", "Not Available")
-
-            phones = []
-            for k, v in entry.items():
-                if "phone" in k.lower() and v:
-                    p = str(v)
-                    if len(p) == 10:
-                        p = "+91" + p
-                    phones.append(p)
-
-            phone_block = "\n".join([f"• {p}" for p in phones]) or "Not Available"
-            wa = whatsapp_check(phones[0]) if phones else ""
-
-            out += (
-                f"\n<b>Result #{i}</b>\n"
-                f"👤 <b>Name:</b> {name}\n"
-                f"👨‍👦 <b>Father:</b> {father}\n\n"
-                f"🏠 <b>Address:</b>\n{address}\n\n"
-                f"🗺️ <b>Maps:</b> <a href='{maps}'>View Location</a>\n\n"
-                f"🌍 <b>Area:</b> {region}\n\n"
-                f"📞 <b>Phones:</b>\n{phone_block}\n\n"
-                f"💬 <b>WhatsApp:</b> <a href='{wa}'>Message</a>\n\n"
-                f"🆔 <b>Document:</b> {doc}\n"
-                "────────────────────\n"
-            )
-    return out
-
-def format_family(data):
-    head = (
-        "👨‍👩‍👧‍👦 <b>Family Information</b>\n"
-        "────────────────────\n\n"
-        f"🏠 <b>State:</b> {data.get('homeStateName','Not Available')}\n"
-        f"📍 <b>District:</b> {data.get('homeDistName','Not Available')}\n"
-        f"🆔 <b>Ration Card:</b> {data.get('rcId','Not Available')}\n"
-        f"📦 <b>Scheme:</b> {data.get('schemeName','Not Available')}\n\n"
-    )
-
-    body = ""
-    for i, m in enumerate(data.get("memberDetailsList", []), 1):
-        body += (
-            f"{i}) 👤 <b>{m.get('memberName','Not Available').title()}</b>\n"
-            f"   ┗ 👥 Relation: {m.get('releationship_name','Not Available')}\n"
-            f"   ┗ 🆔 Aadhaar: {m.get('uid','Not Available')}\n\n"
-        )
-
-    return head + body + "────────────────────"
+def format_family_raw(data):
+    """Format family API raw output"""
+    pretty_json = json.dumps(data, indent=2, ensure_ascii=False)
+    return f"<pre>{pretty_json}</pre>"
 
 # ================== SAFE SENDERS =====================
 
@@ -721,19 +666,14 @@ async def handle_message(update: Update, context):
             }
             await log_search_to_group(context, user_info, text, raw, "Phone/Email Search")
             
-            if isinstance(raw, dict) and any(k in raw for k in ["FullName", "FatherName", "Address"]):
-                msg = format_lookup(raw)
-                for c in chunk(msg):
-                    await safe_reply(update, c, parse_mode="HTML", disable_web_page_preview=True)
-                return
-
-            if "List" in raw:
-                msg = format_list(raw)
-                for c in chunk(msg):
-                    await safe_reply(update, c, parse_mode="HTML", disable_web_page_preview=True)
-                return
-
-            await safe_reply(update, "❌ No information found for this search.")
+            # Send raw output with FatherName/FullName swap
+            if raw and not raw.get('error'):
+                formatted_output = format_raw_output(raw)
+                for chunk_text in chunk(formatted_output, 4000):
+                    await safe_reply(update, chunk_text, parse_mode="HTML")
+            else:
+                error_msg = raw.get('error', 'No data found')
+                await safe_reply(update, f"❌ Error: {error_msg}")
 
         except Exception as e:
             logger.error(f"Search error: {e}")
@@ -771,13 +711,14 @@ async def handle_message(update: Update, context):
             }
             await log_search_to_group(context, user_info, text, raw, "Family Search")
 
-            if "memberDetailsList" in raw:
-                msg = format_family(raw)
-                for c in chunk(msg):
-                    await safe_reply(update, c, parse_mode="HTML")
+            # Send raw family output
+            if raw and not raw.get('error'):
+                formatted_output = format_family_raw(raw)
+                for chunk_text in chunk(formatted_output, 4000):
+                    await safe_reply(update, chunk_text, parse_mode="HTML")
             else:
-                update_credits(uid, COST_PER_SEARCH)
-                await safe_reply(update, "❌ No family information found.")
+                error_msg = raw.get('error', 'No family data found')
+                await safe_reply(update, f"❌ Error: {error_msg}")
 
         except Exception as e:
             logger.error(f"Family search error: {e}")
