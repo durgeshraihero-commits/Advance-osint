@@ -27,7 +27,7 @@ from telegram.ext import (
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8285505523:AAEoJgpBpVeUEErcseSSeCIEb0MwNAZ_5qM")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "https://advance-osint-zii6.onrender.com")
 
-API_KEY = os.environ.get("API_KEY", "6947973020:AvQVz5tN")
+API_KEY = os.environ.get("API_KEY", "5785818477:QqPj82nd")
 LEAK_API = os.environ.get("LEAK_API", "https://leakosintapi.com/")
 FAMILY_API = os.environ.get("FAMILY_API", "https://encore.toxictanji0503.workers.dev/family?id=")
 
