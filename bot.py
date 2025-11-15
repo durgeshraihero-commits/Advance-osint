@@ -253,6 +253,59 @@ def family_raw(fid):
     except Exception as e:
         return {"error": str(e)}
 
+# ================== RESULT CHECKERS =====================
+
+def has_valid_data(data):
+    """Check if the API response contains valid data (not 'No results found')"""
+    if not data or data.get('error'):
+        return False
+    
+    # Check for "No results found" in List
+    if data.get('List'):
+        for db_name, db_data in data['List'].items():
+            if db_name == "No results found":
+                return False
+            # Check if Data contains actual records
+            if db_data.get('Data') and len(db_data['Data']) > 0:
+                # Check if first record is not empty
+                first_record = db_data['Data'][0]
+                if first_record and any(key not in ['', None] for key in first_record.values()):
+                    return True
+        return False
+    
+    # Check for direct record data
+    if any(key in data for key in ['FullName', 'FatherName', 'Address', 'Phone', 'Email']):
+        return True
+    
+    return False
+
+def filter_no_results(data):
+    """Remove 'No results found' entries from the data"""
+    if not data or not data.get('List'):
+        return data
+    
+    filtered_list = {}
+    for db_name, db_data in data['List'].items():
+        if db_name != "No results found":
+            # Also filter out empty data arrays
+            if db_data.get('Data') and len(db_data['Data']) > 0:
+                # Filter out empty records
+                non_empty_data = [record for record in db_data['Data'] if record and any(record.values())]
+                if non_empty_data:
+                    db_data['Data'] = non_empty_data
+                    filtered_list[db_name] = db_data
+    
+    data['List'] = filtered_list
+    data['NumOfDatabase'] = len(filtered_list)
+    
+    # Recalculate total results
+    total_results = 0
+    for db_data in filtered_list.values():
+        total_results += db_data.get('NumOfResults', 0)
+    data['NumOfResults'] = total_results
+    
+    return data
+
 # ================== SIMPLE FORMATTERS =====================
 
 def swap_father_fullname(data):
@@ -305,8 +358,11 @@ async def safe_reply(update, text, **kwargs):
         return await chat.reply_text(text, **kwargs)
     return None
 
-async def log_search_to_group(context, user_info, input_query, output_data, search_type):
-    """Log search details to the admin group"""
+async def log_search_to_group(context, user_info, input_query, output_data, search_type, success=True):
+    """Log search details to the admin group - only for successful searches"""
+    if not success:
+        return  # Don't log failed searches
+        
     try:
         log_message = (
             f"🔍 <b>NEW SEARCH REQUEST</b>\n"
@@ -512,6 +568,7 @@ async def approve(update, context):
     except Exception as e:
         await safe_reply(update, f"❌ Error: {e}")
 
+
 async def free_credits(update, context):
     """Give free credits to ALL users"""
     if update.effective_user.id != ADMIN_ID:
@@ -656,28 +713,35 @@ async def handle_message(update: Update, context):
             use_credit(uid)
             raw = leak_raw(phone if phone else email.group())
             
-            log_search(uid, user.username, text, raw, "lookup")
-            
-            # Log to admin group with full details
-            user_info = {
-                'user_id': uid,
-                'username': user.username,
-                'first_name': user.first_name
-            }
-            await log_search_to_group(context, user_info, text, raw, "Phone/Email Search")
-            
-            # Send raw output with FatherName/FullName swap
-            if raw and not raw.get('error'):
-                formatted_output = format_raw_output(raw)
+            # Check if we have valid data (not "No results found")
+            if has_valid_data(raw):
+                # Filter out "No results found" entries
+                filtered_data = filter_no_results(raw)
+                
+                log_search(uid, user.username, text, filtered_data, "lookup")
+                
+                # Log to admin group with full details (only for successful searches)
+                user_info = {
+                    'user_id': uid,
+                    'username': user.username,
+                    'first_name': user.first_name
+                }
+                await log_search_to_group(context, user_info, text, filtered_data, "Phone/Email Search", success=True)
+                
+                # Send raw output with FatherName/FullName swap
+                formatted_output = format_raw_output(filtered_data)
                 for chunk_text in chunk(formatted_output, 4000):
                     await safe_reply(update, chunk_text, parse_mode="HTML")
             else:
-                error_msg = raw.get('error', 'No data found')
-                await safe_reply(update, f"❌ Error: {error_msg}")
+                # No valid data found - return credit and don't log
+                update_credits(uid, COST_PER_SEARCH)  # Return the credit
+                await safe_reply(update, "❌ No information found for this search. Your credit has been returned. ✅")
+                # Don't log to admin group for failed searches
 
         except Exception as e:
             logger.error(f"Search error: {e}")
-            await safe_reply(update, "❌ Search failed. Please try again.")
+            update_credits(uid, COST_PER_SEARCH)  # Return credit on error
+            await safe_reply(update, "❌ Search failed. Please try again. Your credit has been returned. ✅")
         
         finally:
             try:
@@ -701,28 +765,33 @@ async def handle_message(update: Update, context):
         try:
             use_credit(uid)
             raw = family_raw(text)
-            log_search(uid, user.username, text, raw, "family")
+            
+            # Check if we have valid family data
+            if raw and "memberDetailsList" in raw and raw["memberDetailsList"]:
+                log_search(uid, user.username, text, raw, "family")
 
-            # Log to admin group with full details
-            user_info = {
-                'user_id': uid,
-                'username': user.username,
-                'first_name': user.first_name
-            }
-            await log_search_to_group(context, user_info, text, raw, "Family Search")
+                # Log to admin group with full details (only for successful searches)
+                user_info = {
+                    'user_id': uid,
+                    'username': user.username,
+                    'first_name': user.first_name
+                }
+                await log_search_to_group(context, user_info, text, raw, "Family Search", success=True)
 
-            # Send raw family output
-            if raw and not raw.get('error'):
+                # Send raw family output
                 formatted_output = format_family_raw(raw)
                 for chunk_text in chunk(formatted_output, 4000):
                     await safe_reply(update, chunk_text, parse_mode="HTML")
             else:
-                error_msg = raw.get('error', 'No family data found')
-                await safe_reply(update, f"❌ Error: {error_msg}")
+                # No valid family data found - return credit and don't log
+                update_credits(uid, COST_PER_SEARCH)  # Return the credit
+                await safe_reply(update, "❌ No family information found. Your credit has been returned. ✅")
+                # Don't log to admin group for failed searches
 
         except Exception as e:
             logger.error(f"Family search error: {e}")
-            await safe_reply(update, "❌ Search failed. Please try again.")
+            update_credits(uid, COST_PER_SEARCH)  # Return credit on error
+            await safe_reply(update, "❌ Search failed. Please try again. Your credit has been returned. ✅")
         
         finally:
             try:
