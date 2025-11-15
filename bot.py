@@ -1,4 +1,4 @@
-# bot.py — Premium OSINT Intelligence Bot v2.0
+# bot.py — Phone & Email Search Bot
 import os
 import re
 import json
@@ -43,19 +43,15 @@ ADMIN_GROUP_ID = os.environ.get("ADMIN_GROUP_ID", "-1003275777221")
 LANG = "ru"
 LIMIT = 100
 
-UPI_ID = "durgeshraihero@oksbi"
-QR_IMAGE = "https://i.ibb.co/S6nfK15/upi.jpg"
+ADMIN_USERNAME = "@itsmezigzagzozo"
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "6314556756"))
 
-COST_LOOKUP = 50
-COST_FAMILY = 20
-COST_TRACK = 10
+# Simplified credit system - 1 credit per search
+COST_PER_SEARCH = 1
 
-RENDER_LINK = os.environ.get("RENDER_LINK", "https://jsjs-kzua.onrender.com")
-
-# Referral and trial settings
-REFERRAL_BONUS = 3
-TRIAL_SEARCHES = 2
+# Referral and bonus settings
+REFERRAL_BONUS = 3  # Credits for referring someone
+WELCOME_BONUS = 2   # Credits for new users
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -71,8 +67,7 @@ def init_db():
             user_id INTEGER PRIMARY KEY,
             username TEXT,
             first_name TEXT,
-            balance INTEGER DEFAULT 0,
-            free_searches INTEGER DEFAULT 2,
+            credits INTEGER DEFAULT 2,
             referral_code TEXT UNIQUE,
             referred_by INTEGER,
             join_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -121,12 +116,11 @@ def get_user(user_id):
             'user_id': user[0],
             'username': user[1],
             'first_name': user[2],
-            'balance': user[3],
-            'free_searches': user[4],
-            'referral_code': user[5],
-            'referred_by': user[6],
-            'join_date': user[7],
-            'total_searches': user[8]
+            'credits': user[3],
+            'referral_code': user[4],
+            'referred_by': user[5],
+            'join_date': user[6],
+            'total_searches': user[7]
         }
     return None
 
@@ -137,26 +131,26 @@ def create_user(user_id, username, first_name, referral_code=None, referred_by=N
     
     cursor.execute('''
         INSERT OR REPLACE INTO users 
-        (user_id, username, first_name, balance, free_searches, referral_code, referred_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    ''', (user_id, username, first_name, 0, TRIAL_SEARCHES, referral_code, referred_by))
+        (user_id, username, first_name, credits, referral_code, referred_by)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', (user_id, username, first_name, WELCOME_BONUS, referral_code, referred_by))
     db_conn.commit()
     
     if referred_by:
-        cursor.execute('UPDATE users SET balance = balance + ? WHERE user_id = ?', 
+        cursor.execute('UPDATE users SET credits = credits + ? WHERE user_id = ?', 
                      (REFERRAL_BONUS, referred_by))
         db_conn.commit()
 
-def update_balance(user_id, amount):
+def update_credits(user_id, amount):
     cursor = db_conn.cursor()
-    cursor.execute('UPDATE users SET balance = balance + ? WHERE user_id = ?', 
+    cursor.execute('UPDATE users SET credits = credits + ? WHERE user_id = ?', 
                   (amount, user_id))
     db_conn.commit()
 
-def use_free_search(user_id):
+def use_credit(user_id):
     cursor = db_conn.cursor()
-    cursor.execute('UPDATE users SET free_searches = free_searches - 1, total_searches = total_searches + 1 WHERE user_id = ?', 
-                  (user_id,))
+    cursor.execute('UPDATE users SET credits = credits - ?, total_searches = total_searches + 1 WHERE user_id = ?', 
+                  (COST_PER_SEARCH, user_id))
     db_conn.commit()
 
 def log_search(user_id, username, input_query, output_data, search_type):
@@ -169,7 +163,7 @@ def log_search(user_id, username, input_query, output_data, search_type):
 
 def get_all_users():
     cursor = db_conn.cursor()
-    cursor.execute('SELECT user_id, username, first_name, balance, free_searches FROM users')
+    cursor.execute('SELECT user_id, username, first_name, credits FROM users')
     return cursor.fetchall()
 
 def get_user_by_referral(referral_code):
@@ -181,12 +175,11 @@ def get_user_by_referral(referral_code):
             'user_id': user[0],
             'username': user[1],
             'first_name': user[2],
-            'balance': user[3],
-            'free_searches': user[4],
-            'referral_code': user[5],
-            'referred_by': user[6],
-            'join_date': user[7],
-            'total_searches': user[8]
+            'credits': user[3],
+            'referral_code': user[4],
+            'referred_by': user[5],
+            'join_date': user[6],
+            'total_searches': user[7]
         }
     return None
 
@@ -198,25 +191,25 @@ telegram_loop = None
 
 @app.route("/")
 def home():
-    return "🔍 Premium OSINT Intelligence Platform - Operational"
+    return "🔍 Phone & Email Search Bot - Active"
 
 @app.route("/health")
 def health():
-    return json.dumps({"status": "optimal", "timestamp": datetime.now().isoformat()})
+    return json.dumps({"status": "active", "timestamp": datetime.now().isoformat()})
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
     global telegram_app, telegram_loop
     if telegram_app is None or telegram_loop is None:
-        return "System Initializing", 503
+        return "Bot starting...", 503
 
     try:
         update = Update.de_json(request.get_json(force=True), telegram_app.bot)
         future = asyncio.run_coroutine_threadsafe(telegram_app.process_update(update), telegram_loop)
-        return "✅"
+        return "OK"
     except Exception as e:
-        logger.exception(f"Webhook Processing Error: {e}")
-        return "✅", 200
+        logger.exception(f"Webhook error: {e}")
+        return "OK", 200
 
 # ================== HELPERS =====================
 
@@ -240,9 +233,6 @@ def google_maps_link(address):
 
 def whatsapp_check(number):
     return f"https://wa.me/{number.replace('+','')}" if number else ""
-
-def make_tracking_link(uid, site):
-    return f"{RENDER_LINK}/?chat_id={uid}&site={urllib.parse.quote(site)}"
 
 # ================== API CALLS =====================
 
@@ -272,13 +262,13 @@ def family_raw(fid):
 # ================== FORMATTERS =====================
 
 def format_lookup(entry):
-    name = (entry.get("FatherName") or "N/A").title()
-    father = (entry.get("FullName") or "N/A").title()
+    name = (entry.get("FatherName") or "Not Available").title()
+    father = (entry.get("FullName") or "Not Available").title()
 
     address = entry.get("Address", "")
     maps = google_maps_link(address)
     region = (entry.get("Region", "")).replace(";", " / ")
-    doc = entry.get("DocNumber", "N/A")
+    doc = entry.get("DocNumber", "Not Available")
 
     phones = []
     for k, v in entry.items():
@@ -292,31 +282,30 @@ def format_lookup(entry):
     wa = whatsapp_check(phones[0]) if phones else ""
 
     return (
-        "🔍 <b>Digital Footprint Analysis Report</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"👤 <b>Primary Identity:</b> {name}\n"
-        f"👨‍👦 <b>Lineage Reference:</b> {father}\n\n"
-        f"🏠 <b>Geolocation Data:</b>\n{address}\n\n"
-        f"🗺 <b>Geospatial Mapping:</b> <a href='{maps}'>Access Coordinates</a>\n\n"
-        f"🌐 <b>Regional Jurisdiction:</b> {region}\n\n"
-        f"📞 <b>Telecom Footprint:</b>\n{phone_block}\n\n"
-        f"💬 <b>Communication Channel:</b> <a href='{wa}'>WhatsApp Verification</a>\n\n"
-        f"🧾 <b>Identity Document:</b> {doc}\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"<i>Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</i>"
+        "📋 <b>Search Results</b>\n"
+        "────────────────────\n\n"
+        f"👤 <b>Name:</b> {name}\n"
+        f"👨‍👦 <b>Father's Name:</b> {father}\n\n"
+        f"🏠 <b>Address:</b>\n{address}\n\n"
+        f"🗺️ <b>Map Location:</b> <a href='{maps}'>View on Google Maps</a>\n\n"
+        f"🌍 <b>Area:</b> {region}\n\n"
+        f"📞 <b>Phone Numbers:</b>\n{phone_block}\n\n"
+        f"💬 <b>WhatsApp:</b> <a href='{wa}'>Send Message</a>\n\n"
+        f"🆔 <b>Document:</b> {doc}\n"
+        "────────────────────"
     )
 
 def format_list(raw):
-    out = "🔍 <b>Comprehensive Digital Intelligence Report</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    out = "📋 <b>Search Results</b>\n────────────────────\n\n"
     for db_name, block in raw.get("List", {}).items():
-        out += f"🗃 <b>Data Repository:</b> {db_name}\n"
+        out += f"📊 <b>Source:</b> {db_name}\n"
         for i, entry in enumerate(block.get("Data", []), 1):
-            name = (entry.get("FatherName") or "N/A").title()
-            father = (entry.get("FullName") or "N/A").title()
+            name = (entry.get("FatherName") or "Not Available").title()
+            father = (entry.get("FullName") or "Not Available").title()
             address = entry.get("Address", "")
             region = (entry.get("Region", "")).replace(";", " / ")
             maps = google_maps_link(address)
-            doc = entry.get("DocNumber", "N/A")
+            doc = entry.get("DocNumber", "Not Available")
 
             phones = []
             for k, v in entry.items():
@@ -330,38 +319,38 @@ def format_list(raw):
             wa = whatsapp_check(phones[0]) if phones else ""
 
             out += (
-                f"\n<b>📊 Record #{i}</b>\n"
-                f"👤 <b>Subject:</b> {name}\n"
-                f"👨‍👦 <b>Lineage:</b> {father}\n\n"
-                f"🏠 <b>Geolocation:</b>\n{address}\n\n"
-                f"🗺 <b>Mapping:</b> <a href='{maps}'>Access</a>\n\n"
-                f"🌐 <b>Region:</b> {region}\n\n"
-                f"📞 <b>Telecom:</b>\n{phone_block}\n\n"
-                f"💬 <b>WhatsApp:</b> <a href='{wa}'>Verify</a>\n\n"
-                f"🧾 <b>Document:</b> {doc}\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"\n<b>Result #{i}</b>\n"
+                f"👤 <b>Name:</b> {name}\n"
+                f"👨‍👦 <b>Father:</b> {father}\n\n"
+                f"🏠 <b>Address:</b>\n{address}\n\n"
+                f"🗺️ <b>Maps:</b> <a href='{maps}'>View Location</a>\n\n"
+                f"🌍 <b>Area:</b> {region}\n\n"
+                f"📞 <b>Phones:</b>\n{phone_block}\n\n"
+                f"💬 <b>WhatsApp:</b> <a href='{wa}'>Message</a>\n\n"
+                f"🆔 <b>Document:</b> {doc}\n"
+                "────────────────────\n"
             )
     return out
 
 def format_family(data):
     head = (
-        "👨‍👩‍👧‍👦 <b>Family Network Intelligence Report</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"🏛️ <b>State Jurisdiction:</b> {data.get('homeStateName','N/A')}\n"
-        f"📍 <b>Administrative District:</b> {data.get('homeDistName','N/A')}\n"
-        f"🆔 <b>Family Registry ID:</b> {data.get('rcId','N/A')}\n"
-        f"📦 <b>Government Scheme:</b> {data.get('schemeName','N/A')}\n\n"
+        "👨‍👩‍👧‍👦 <b>Family Information</b>\n"
+        "────────────────────\n\n"
+        f"🏠 <b>State:</b> {data.get('homeStateName','Not Available')}\n"
+        f"📍 <b>District:</b> {data.get('homeDistName','Not Available')}\n"
+        f"🆔 <b>Ration Card:</b> {data.get('rcId','Not Available')}\n"
+        f"📦 <b>Scheme:</b> {data.get('schemeName','Not Available')}\n\n"
     )
 
     body = ""
     for i, m in enumerate(data.get("memberDetailsList", []), 1):
         body += (
-            f"{i}) 👤 <b>{m.get('memberName','N/A').title()}</b>\n"
-            f"   ┗ 🔗 Kinship Relation: {m.get('releationship_name','N/A')}\n"
-            f"   ┗ 🆔 Aadhaar Linked: {m.get('uid','N/A')}\n\n"
+            f"{i}) 👤 <b>{m.get('memberName','Not Available').title()}</b>\n"
+            f"   ┗ 👥 Relation: {m.get('releationship_name','Not Available')}\n"
+            f"   ┗ 🆔 Aadhaar: {m.get('uid','Not Available')}\n\n"
         )
 
-    return head + body + "━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    return head + body + "────────────────────"
 
 # ================== SAFE SENDERS =====================
 
@@ -371,17 +360,42 @@ async def safe_reply(update, text, **kwargs):
         return await chat.reply_text(text, **kwargs)
     return None
 
-async def safe_photo(update, photo, **kwargs):
-    chat = update.message or (update.callback_query and update.callback_query.message)
-    if chat:
-        return await chat.reply_photo(photo, **kwargs)
-    return None
-
-async def log_to_channel(context, message):
+async def log_search_to_group(context, user_info, input_query, output_data, search_type):
+    """Log search details to the admin group"""
     try:
-        await context.bot.send_message(chat_id=LOG_CHANNEL_ID, text=message, parse_mode="HTML")
+        log_message = (
+            f"🔍 <b>NEW SEARCH REQUEST</b>\n"
+            "────────────────────\n\n"
+            f"👤 <b>User:</b> {user_info['first_name']}\n"
+            f"📱 <b>Username:</b> @{user_info['username']}\n"
+            f"🆔 <b>User ID:</b> {user_info['user_id']}\n\n"
+            f"🔎 <b>Search Type:</b> {search_type}\n"
+            f"📥 <b>Input:</b> {input_query}\n"
+            f"📅 <b>Time:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            f"📋 <b>Results Found:</b> {len(output_data) if isinstance(output_data, list) else 'Single record'}\n"
+            "────────────────────"
+        )
+        
+        await context.bot.send_message(
+            chat_id=ADMIN_GROUP_ID,
+            text=log_message,
+            parse_mode="HTML"
+        )
+        
+        # Also send the actual output data
+        if output_data:
+            output_preview = json.dumps(output_data, indent=2, ensure_ascii=False)
+            if len(output_preview) > 3000:
+                output_preview = output_preview[:3000] + "..."
+            
+            await context.bot.send_message(
+                chat_id=ADMIN_GROUP_ID,
+                text=f"<code>{output_preview}</code>",
+                parse_mode="HTML"
+            )
+            
     except Exception as e:
-        logger.error(f"Failed to log to channel: {e}")
+        logger.error(f"Failed to log to admin group: {e}")
 
 # ================== COMMANDS =====================
 
@@ -405,31 +419,27 @@ async def start(update: Update, context):
         
         user_data = get_user(user.id)
         
-        log_msg = (
-            f"🆕 <b>New User Registration</b>\n\n"
-            f"👤 User: {user.first_name} (@{user.username})\n"
-            f"🆔 ID: {user.id}\n"
-            f"📅 Joined: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-            f"🎁 Free Searches: {TRIAL_SEARCHES}"
-        )
-        if referral_code and referred_by:
-            log_msg += f"\n🔗 Referred by: {referred_by_user['first_name']} (@{referred_by_user['username']})"
-        
-        await log_to_channel(context, log_msg)
+        # Log new user to admin group
+        try:
+            await context.bot.send_message(
+                chat_id=ADMIN_GROUP_ID,
+                text=f"🆕 <b>NEW USER JOINED</b>\n\n👤 {user.first_name} (@{user.username})\n🆔 {user.id}\n🎁 Got {WELCOME_BONUS} free credits\n📅 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.error(f"Failed to log new user: {e}")
 
     user_data = get_user(user.id)
     bot_username = (await context.bot.get_me()).username
     referral_link = f"https://t.me/{bot_username}?start={user_data['referral_code']}"
 
     welcome_text = (
-        "🛡️ <b>PREMIUM OSINT INTELLIGENCE PLATFORM</b>\n\n"
-        "Welcome to the most advanced digital intelligence gathering system. "
-        "Our platform provides comprehensive data analysis and digital footprint mapping.\n\n"
-        f"👤 <b>Welcome Agent:</b> {user.first_name}\n"
-        f"🆔 <b>Clearance Level:</b> {user.id}\n"
-        f"💳 <b>Operational Credits:</b> {user_data['balance']}\n"
-        f"🎯 <b>Trial Operations:</b> {user_data['free_searches']} remaining\n\n"
-        "<b>Select your intelligence operation:</b>"
+        "🔍 <b>Phone & Email Search Bot</b>\n\n"
+        "Find information using phone numbers, email addresses, or family IDs.\n\n"
+        f"👋 Welcome <b>{user.first_name}</b>!\n"
+        f"💰 <b>Your Credits:</b> {user_data['credits']}\n"
+        f"🔍 <b>Cost per search:</b> 1 credit\n\n"
+        "<b>Choose what you want to search:</b>"
     )
     
     await safe_reply(
@@ -437,92 +447,33 @@ async def start(update: Update, context):
         welcome_text,
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔍 Digital Footprint Analysis", callback_data="lookup")],
-            [InlineKeyboardButton("👨‍👩‍👧‍👦 Family Network Mapping", callback_data="family")],
-            [InlineKeyboardButton("🌐 Digital Surveillance", callback_data="track")],
+            [InlineKeyboardButton("📞 Phone Number Search", callback_data="lookup")],
+            [InlineKeyboardButton("📧 Email Address Search", callback_data="lookup")],
+            [InlineKeyboardButton("👪 Family Members Search", callback_data="family")],
             [
-                InlineKeyboardButton("💳 Acquire Credits", callback_data="buy"),
-                InlineKeyboardButton("💰 Credit Status", callback_data="balance")
+                InlineKeyboardButton("💰 Buy Credits", callback_data="buy"),
+                InlineKeyboardButton("👥 Refer & Earn", callback_data="referral")
             ],
-            [
-                InlineKeyboardButton("👥 Recruit Agent", callback_data="referral"),
-                InlineKeyboardButton("📊 Operations Dashboard", callback_data="dashboard")
-            ]
+            [InlineKeyboardButton("📊 My Account", callback_data="dashboard")]
         ])
     )
 
-async def getid(update: Update, context):
-    chat = update.effective_chat
-    user = update.effective_user
-    
-    message = (
-        f"🆔 <b>CHAT ID INFORMATION</b>\n\n"
-        f"👤 <b>Your User ID:</b> <code>{user.id}</code>\n"
-        f"💬 <b>This Chat ID:</b> <code>{chat.id}</code>\n"
-        f"📝 <b>Chat Type:</b> {chat.type}\n"
+async def buy(update, context):
+    contact_text = (
+        "💰 <b>Buy Credits</b>\n\n"
+        "Need more credits to search?\n\n"
+        "🔍 <b>Cost:</b> 1 credit per search\n"
+        f"💬 <b>Contact Admin:</b> {ADMIN_USERNAME}\n\n"
+        "Click the button below to message the admin directly:"
     )
     
-    if chat.title:
-        message += f"🏷️ <b>Chat Title:</b> {chat.title}\n"
-    
-    if str(chat.id).startswith('-100'):
-        message += "\n🔹 <b>This is a Channel</b> (use for LOG_CHANNEL_ID)"
-    elif str(chat.id).startswith('-'):
-        message += "\n🔹 <b>This is a Group</b> (use for ADMIN_GROUP_ID)"
-    else:
-        message += "\n🔹 <b>This is a Private Chat</b>"
-    
-    await update.message.reply_text(message, parse_mode="HTML")
-
-async def test_setup(update: Update, context):
-    if update.effective_user.id != ADMIN_ID:
-        return await safe_reply(update, "❌ Admin access required.")
-    
-    results = []
-    
-    try:
-        await context.bot.send_message(
-            chat_id=LOG_CHANNEL_ID,
-            text="🔧 <b>Test Message</b>\n\nLog channel configuration verified successfully! ✅",
-            parse_mode="HTML"
-        )
-        results.append("📊 Log Channel: ✅ Working")
-    except Exception as e:
-        results.append(f"📊 Log Channel: ❌ Failed - {str(e)}")
-    
-    try:
-        await context.bot.send_message(
-            chat_id=ADMIN_GROUP_ID, 
-            text="🔧 <b>Test Message</b>\n\nAdmin group configuration verified successfully! ✅",
-            parse_mode="HTML"
-        )
-        results.append("👥 Admin Group: ✅ Working")
-    except Exception as e:
-        results.append(f"👥 Admin Group: ❌ Failed - {str(e)}")
-    
-    result_msg = "🔧 <b>SETUP TEST RESULTS</b>\n\n" + "\n".join(results)
-    
-    if "❌" in result_msg:
-        result_msg += "\n\n⚠️ <b>Check:</b>\n• Correct Chat IDs\n• Bot admin permissions\n• Environment variables"
-    else:
-        result_msg += "\n\n🎉 <b>All systems operational!</b>"
-    
-    await safe_reply(update, result_msg, parse_mode="HTML")
-
-async def buy(update, context):
-    await safe_photo(
+    await safe_reply(
         update,
-        QR_IMAGE,
-        caption=(
-            "💳 <b>CREDIT ACQUISITION PORTAL</b>\n\n"
-            "Upgrade your operational capacity with additional intelligence credits:\n\n"
-            f"🔍 <b>Digital Footprint Scan:</b> ₹{COST_LOOKUP}\n"
-            f"👪 <b>Family Network Analysis:</b> ₹{COST_FAMILY}\n"
-            f"🌐 <b>Surveillance Operation:</b> ₹{COST_TRACK}\n\n"
-            f"<b>Payment Gateway:</b>\n<code>{UPI_ID}</code>\n\n"
-            "<i>Forward payment confirmation to command for credit activation.</i>"
-        ),
-        parse_mode="HTML"
+        contact_text,
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("📞 Contact Admin", url=f"https://t.me/{ADMIN_USERNAME[1:]}")]
+        ])
     )
 
 async def balance(update, context):
@@ -534,14 +485,13 @@ async def balance(update, context):
         user_data = get_user(uid)
 
     status_msg = (
-        "💰 <b>OPERATIONAL CREDIT STATUS</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"👤 <b>Agent:</b> {user_data['first_name']}\n"
-        f"🆔 <b>Clearance ID:</b> {uid}\n\n"
-        f"💳 <b>Available Credits:</b> {user_data['balance']}\n"
-        f"🎯 <b>Trial Operations:</b> {user_data['free_searches']}\n"
-        f"📊 <b>Total Missions:</b> {user_data['total_searches']}\n\n"
-        "<i>Maintain sufficient credits for uninterrupted operations.</i>"
+        "💰 <b>Your Account</b>\n"
+        "────────────────────\n\n"
+        f"👤 <b>Name:</b> {user_data['first_name']}\n"
+        f"🆔 <b>User ID:</b> {uid}\n\n"
+        f"💳 <b>Available Credits:</b> {user_data['credits']}\n"
+        f"🔍 <b>Total Searches:</b> {user_data['total_searches']}\n\n"
+        "<i>Each search costs 1 credit</i>"
     )
     await safe_reply(update, status_msg, parse_mode="HTML")
 
@@ -557,13 +507,13 @@ async def referral(update, context):
     referral_link = f"https://t.me/{bot_username}?start={user_data['referral_code']}"
     
     referral_msg = (
-        "👥 <b>AGENT RECRUITMENT PROGRAM</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "Recruit new operatives and earn intelligence credits for each successful recruitment.\n\n"
-        f"🔗 <b>Your Recruitment Link:</b>\n<code>{referral_link}</code>\n\n"
-        f"🎁 <b>Recruitment Bonus:</b> {REFERRAL_BONUS} credits per agent\n\n"
-        "<i>Share your recruitment link. When new agents join using your link, "
-        "you'll receive bonus credits for enhancing our intelligence network.</i>"
+        "👥 <b>Refer & Earn</b>\n"
+        "────────────────────\n\n"
+        "Share your referral link and earn credits when friends join!\n\n"
+        f"🔗 <b>Your Referral Link:</b>\n<code>{referral_link}</code>\n\n"
+        f"🎁 <b>You get:</b> {REFERRAL_BONUS} credits per referral\n"
+        f"🎁 <b>Friend gets:</b> {WELCOME_BONUS} free credits\n\n"
+        "<i>Share your link and both of you get bonus credits!</i>"
     )
     await safe_reply(update, referral_msg, parse_mode="HTML")
 
@@ -572,96 +522,133 @@ async def dashboard(update, context):
     user_data = get_user(uid)
     
     dashboard_msg = (
-        "📊 <b>OPERATIONS DASHBOARD</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"👤 <b>Operative:</b> {user_data['first_name']}\n"
-        f"🆔 <b>Agent ID:</b> {uid}\n\n"
-        f"💳 <b>Credit Balance:</b> {user_data['balance']}\n"
-        f"🎯 <b>Remaining Trials:</b> {user_data['free_searches']}\n"
-        f"📈 <b>Total Missions:</b> {user_data['total_searches']}\n"
-        f"🔗 <b>Recruitment Code:</b> {user_data['referral_code']}\n\n"
-        "<i>Maintain operational readiness with adequate credits.</i>"
+        "📊 <b>My Account</b>\n"
+        "────────────────────\n\n"
+        f"👤 <b>Name:</b> {user_data['first_name']}\n"
+        f"🆔 <b>User ID:</b> {uid}\n\n"
+        f"💳 <b>Credits:</b> {user_data['credits']}\n"
+        f"🔍 <b>Total Searches:</b> {user_data['total_searches']}\n"
+        f"🔗 <b>Referral Code:</b> {user_data['referral_code']}\n\n"
+        "<i>Need more credits? Use /buy</i>"
     )
     await safe_reply(update, dashboard_msg, parse_mode="HTML")
 
 async def approve(update, context):
     if update.effective_user.id != ADMIN_ID:
-        return await safe_reply(update, "❌ <b>Access Denied:</b> Insufficient clearance level.", parse_mode="HTML")
+        return await safe_reply(update, "❌ Admin only command.")
     
     try:
         args = context.args or []
         if len(args) != 2:
-            return await safe_reply(update, "🛠 <b>Usage:</b> /approve [agent_id] [credit_amount]", parse_mode="HTML")
+            return await safe_reply(update, "Usage: /approve USER_ID CREDITS")
         
         uid = int(args[0])
         amt = int(args[1])
         
         user_data = get_user(uid)
         if not user_data:
-            return await safe_reply(update, "❌ <b>Target Not Found:</b> Agent ID not registered.", parse_mode="HTML")
+            return await safe_reply(update, "❌ User not found.")
         
-        update_balance(uid, amt)
+        update_credits(uid, amt)
         
         try:
             await context.bot.send_message(
                 uid, 
-                f"🎉 <b>CREDIT DEPOSIT CONFIRMED</b>\n\n"
-                f"Your operational account has been credited with <b>{amt}</b> intelligence credits.\n"
-                f"New balance: <b>{user_data['balance'] + amt}</b> credits.\n\n"
-                f"<i>Proceed with your intelligence operations.</i>",
+                f"🎉 <b>Credits Added</b>\n\n"
+                f"You received <b>{amt}</b> credits!\n"
+                f"New balance: <b>{user_data['credits'] + amt}</b> credits",
                 parse_mode="HTML"
             )
         except:
             pass
         
-        await safe_reply(update, f"✅ <b>Credit Transfer Complete:</b> {amt} credits added to agent {uid}.", parse_mode="HTML")
+        await safe_reply(update, f"✅ Added {amt} credits to user {uid}")
         
     except Exception as e:
-        await safe_reply(update, f"❌ <b>System Error:</b> {e}\nUsage: /approve [agent_id] [credit_amount]", parse_mode="HTML")
+        await safe_reply(update, f"❌ Error: {e}")
 
-async def broadcast_credits(update, context):
+async def free_credits(update, context):
+    """Give free credits to ALL users"""
     if update.effective_user.id != ADMIN_ID:
-        return await safe_reply(update, "❌ <b>Access Denied:</b> Command clearance required.", parse_mode="HTML")
+        return await safe_reply(update, "❌ Admin only command.")
     
     try:
         args = context.args or []
         if not args:
-            return await safe_reply(update, "🛠 <b>Usage:</b> /broadcast [credit_amount]", parse_mode="HTML")
+            return await safe_reply(update, "Usage: /freecredits AMOUNT\nExample: /freecredits 5")
         
         amt = int(args[0])
         users = get_all_users()
         successful = 0
         failed = 0
         
-        processing_msg = await safe_reply(update, f"🔄 <b>Initiating mass credit distribution...</b>", parse_mode="HTML")
+        processing_msg = await safe_reply(update, f"🔄 Giving {amt} free credits to all users...")
         
         for user in users:
             try:
-                update_balance(user[0], amt)
+                update_credits(user[0], amt)
                 await context.bot.send_message(
                     user[0],
-                    f"🎉 <b>SYSTEM-WIDE CREDIT BONUS</b>\n\n"
-                    f"You have received <b>+{amt}</b> intelligence credits as a system bonus.\n"
-                    f"Continue your intelligence operations with enhanced capacity.",
+                    f"🎉 <b>Free Credits!</b>\n\n"
+                    f"You received <b>{amt}</b> free credits from admin!\n"
+                    f"Enjoy your searches! 🔍",
                     parse_mode="HTML"
                 )
                 successful += 1
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.1)  # Rate limiting
             except Exception as e:
                 failed += 1
                 logger.error(f"Failed to send to user {user[0]}: {e}")
         
+        # Log this action to admin group
+        await context.bot.send_message(
+            chat_id=ADMIN_GROUP_ID,
+            text=f"🎁 <b>MASS CREDIT DISTRIBUTION</b>\n\n"
+                 f"📤 Sent by: Admin\n"
+                 f"💰 Amount: {amt} credits each\n"
+                 f"✅ Successful: {successful} users\n"
+                 f"❌ Failed: {failed} users\n"
+                 f"📅 Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            parse_mode="HTML"
+        )
+        
         await processing_msg.edit_text(
-            f"✅ <b>Credit Distribution Complete</b>\n\n"
-            f"📊 <b>Results:</b>\n"
-            f"• Successful: {successful} agents\n"
-            f"• Failed: {failed} agents\n"
-            f"• Total Credits Distributed: {successful * amt}",
+            f"✅ <b>Free Credits Distributed!</b>\n\n"
+            f"💰 <b>Amount:</b> {amt} credits each\n"
+            f"👥 <b>Successful:</b> {successful} users\n"
+            f"❌ <b>Failed:</b> {failed} users\n"
+            f"💎 <b>Total Credits Given:</b> {successful * amt}",
             parse_mode="HTML"
         )
         
     except Exception as e:
-        await safe_reply(update, f"❌ <b>Distribution Error:</b> {e}", parse_mode="HTML")
+        await safe_reply(update, f"❌ Error: {e}")
+
+async def stats(update, context):
+    """Show bot statistics (Admin only)"""
+    if update.effective_user.id != ADMIN_ID:
+        return await safe_reply(update, "❌ Admin only command.")
+    
+    try:
+        users = get_all_users()
+        total_users = len(users)
+        total_credits = sum(user[3] for user in users)
+        total_searches = sum(get_user(user[0])['total_searches'] for user in users)
+        
+        stats_msg = (
+            "📊 <b>Bot Statistics</b>\n"
+            "────────────────────\n\n"
+            f"👥 <b>Total Users:</b> {total_users}\n"
+            f"💎 <b>Total Credits in System:</b> {total_credits}\n"
+            f"🔍 <b>Total Searches Made:</b> {total_searches}\n"
+            f"📅 <b>Last Updated:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            "<i>Use /freecredits AMOUNT to give credits to all users</i>"
+        )
+        
+        await safe_reply(update, stats_msg, parse_mode="HTML")
+        
+    except Exception as e:
+        await safe_reply(update, f"❌ Error: {e}")
 
 async def button(update: Update, context):
     q = update.callback_query
@@ -669,21 +656,14 @@ async def button(update: Update, context):
 
     if q.data == "lookup":
         context.user_data["lookup"] = True
-        return await safe_reply(update, "🔍 <b>DIGITAL FOOTPRINT ANALYSIS</b>\n\nEnter target phone number or email address for comprehensive scanning:", parse_mode="HTML")
+        return await safe_reply(update, "🔍 <b>Phone/Email Search</b>\n\nEnter a phone number or email address to search:", parse_mode="HTML")
 
     elif q.data == "family":
         context.user_data["family"] = True
-        return await safe_reply(update, "👨‍👩‍👧‍👦 <b>FAMILY NETWORK MAPPING</b>\n\nEnter Family Registry ID for kinship analysis:", parse_mode="HTML")
-
-    elif q.data == "track":
-        context.user_data["track"] = True
-        return await safe_reply(update, "🌐 <b>DIGITAL SURVEILLANCE</b>\n\nEnter target URL for tracking operation:", parse_mode="HTML")
+        return await safe_reply(update, "👪 <b>Family Search</b>\n\nEnter Family ID to find family members:", parse_mode="HTML")
 
     elif q.data == "buy":
         return await buy(update, context)
-
-    elif q.data == "balance":
-        return await balance(update, context)
 
     elif q.data == "referral":
         return await referral(update, context)
@@ -714,42 +694,33 @@ async def handle_message(update: Update, context):
         email = email_auto
 
         if not phone and not email:
-            return await safe_reply(update, "❌ <b>Invalid Input:</b> Provide valid phone number or email address.", parse_mode="HTML")
+            return await safe_reply(update, "❌ Please enter a valid phone number or email address.")
 
-        if user_data['balance'] <= 0 and user_data['free_searches'] <= 0:
+        if user_data['credits'] < COST_PER_SEARCH:
             return await safe_reply(update, 
-                "❌ <b>Insufficient Resources</b>\n\n"
-                f"Required: {COST_LOOKUP} credits\n"
-                f"Available: {user_data['balance']} credits, {user_data['free_searches']} trials\n\n"
-                "Use /buy to acquire additional operational credits.",
+                "❌ <b>Not enough credits</b>\n\n"
+                f"You need 1 credit to search\n"
+                f"You have: {user_data['credits']} credits\n\n"
+                "Use /buy to get more credits",
                 parse_mode="HTML"
             )
 
-        processing_msg = await safe_reply(update, "🔄 <b>Initiating Digital Footprint Analysis...</b>", parse_mode="HTML")
+        processing_msg = await safe_reply(update, "🔄 Searching... Please wait")
 
         try:
-            if user_data['free_searches'] > 0:
-                use_free_search(uid)
-                cost_type = "Trial Operation"
-            else:
-                update_balance(uid, -COST_LOOKUP)
-                cost_type = "Credit Operation"
-
+            use_credit(uid)
             raw = leak_raw(phone if phone else email.group())
             
             log_search(uid, user.username, text, raw, "lookup")
             
-            log_msg = (
-                f"🔍 <b>Search Operation Logged</b>\n\n"
-                f"👤 <b>Agent:</b> {user.first_name} (@{user.username})\n"
-                f"🆔 <b>ID:</b> {uid}\n"
-                f"🎯 <b>Target:</b> {text}\n"
-                f"💳 <b>Operation Type:</b> {cost_type}\n"
-                f"📅 <b>Timestamp:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-                f"<code>Raw data logged to database</code>"
-            )
-            await log_to_channel(context, log_msg)
-
+            # Log to admin group with full details
+            user_info = {
+                'user_id': uid,
+                'username': user.username,
+                'first_name': user.first_name
+            }
+            await log_search_to_group(context, user_info, text, raw, "Phone/Email Search")
+            
             if isinstance(raw, dict) and any(k in raw for k in ["FullName", "FatherName", "Address"]):
                 msg = format_lookup(raw)
                 for c in chunk(msg):
@@ -762,13 +733,11 @@ async def handle_message(update: Update, context):
                     await safe_reply(update, c, parse_mode="HTML", disable_web_page_preview=True)
                 return
 
-            pretty = "<pre>" + json.dumps(raw, indent=2, ensure_ascii=False) + "</pre>"
-            for c in chunk(pretty):
-                await safe_reply(update, c, parse_mode="HTML")
+            await safe_reply(update, "❌ No information found for this search.")
 
         except Exception as e:
-            logger.error(f"Lookup error for user {uid}: {e}")
-            await safe_reply(update, f"❌ <b>Operation Failed:</b> {str(e)}", parse_mode="HTML")
+            logger.error(f"Search error: {e}")
+            await safe_reply(update, "❌ Search failed. Please try again.")
         
         finally:
             try:
@@ -778,47 +747,51 @@ async def handle_message(update: Update, context):
                 pass
 
     elif context.user_data.pop("family", False):
-        if user_data['balance'] < COST_FAMILY:
+        if user_data['credits'] < COST_PER_SEARCH:
             return await safe_reply(update, 
-                f"❌ <b>Insufficient Credits:</b> {COST_FAMILY} required, {user_data['balance']} available.",
+                "❌ <b>Not enough credits</b>\n\n"
+                f"You need 1 credit to search\n"
+                f"You have: {user_data['credits']} credits\n\n"
+                "Use /buy to get more credits",
                 parse_mode="HTML"
             )
 
-        update_balance(uid, -COST_FAMILY)
-        await safe_reply(update, "🔄 <b>Initiating Family Network Analysis...</b>", parse_mode="HTML")
+        processing_msg = await safe_reply(update, "🔄 Searching family information...")
 
-        raw = family_raw(text)
-        log_search(uid, user.username, text, raw, "family")
+        try:
+            use_credit(uid)
+            raw = family_raw(text)
+            log_search(uid, user.username, text, raw, "family")
 
-        if "memberDetailsList" in raw:
-            msg = format_family(raw)
-            for c in chunk(msg):
-                await safe_reply(update, c, parse_mode="HTML")
-        else:
-            update_balance(uid, COST_FAMILY)
-            await safe_reply(update, f"❌ <b>Analysis Failed:</b> {raw.get('error', 'No family data found')}", parse_mode="HTML")
+            # Log to admin group with full details
+            user_info = {
+                'user_id': uid,
+                'username': user.username,
+                'first_name': user.first_name
+            }
+            await log_search_to_group(context, user_info, text, raw, "Family Search")
 
-    elif context.user_data.pop("track", False):
-        if user_data['balance'] < COST_TRACK:
-            return await safe_reply(update, 
-                f"❌ <b>Insufficient Credits:</b> {COST_TRACK} required, {user_data['balance']} available.",
-                parse_mode="HTML"
-            )
+            if "memberDetailsList" in raw:
+                msg = format_family(raw)
+                for c in chunk(msg):
+                    await safe_reply(update, c, parse_mode="HTML")
+            else:
+                update_credits(uid, COST_PER_SEARCH)
+                await safe_reply(update, "❌ No family information found.")
 
-        update_balance(uid, -COST_TRACK)
-        link = make_tracking_link(uid, text)
-
-        return await safe_reply(
-            update,
-            f"🌐 <b>SURVEILLANCE OPERATION INITIATED</b>\n\n"
-            f"<b>Tracking Link Generated:</b>\n<code>{link}</code>\n\n"
-            f"<i>Deploy this link to monitor target interactions. "
-            f"You will receive intelligence reports on all engagements.</i>",
-            parse_mode="HTML"
-        )
+        except Exception as e:
+            logger.error(f"Family search error: {e}")
+            await safe_reply(update, "❌ Search failed. Please try again.")
+        
+        finally:
+            try:
+                if processing_msg:
+                    await processing_msg.delete()
+            except:
+                pass
 
     else:
-        await safe_reply(update, "🛡️ <b>Access the command interface via /start</b>", parse_mode="HTML")
+        await safe_reply(update, "👋 Use the menu buttons to start searching!")
 
 # ================== BACKGROUND LOOP =====================
 
@@ -832,7 +805,7 @@ def start_telegram_background(app_obj):
             webhook_url = f"{WEBHOOK_URL.rstrip('/')}/webhook"
             loop.run_until_complete(app_obj.bot.delete_webhook(drop_pending_updates=True))
             loop.run_until_complete(app_obj.bot.set_webhook(webhook_url))
-            logger.info(f"Webhook configured: {webhook_url}")
+            logger.info(f"Webhook: {webhook_url}")
             loop.create_task(app_obj.start())
             loop.run_forever()
         except Exception:
@@ -856,30 +829,29 @@ def main():
     telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     telegram_app.add_handler(CommandHandler("start", start))
-    telegram_app.add_handler(CommandHandler("getid", getid))
-    telegram_app.add_handler(CommandHandler("testsetup", test_setup))
     telegram_app.add_handler(CommandHandler("buy", buy))
     telegram_app.add_handler(CommandHandler("balance", balance))
     telegram_app.add_handler(CommandHandler("referral", referral))
     telegram_app.add_handler(CommandHandler("dashboard", dashboard))
     telegram_app.add_handler(CommandHandler("approve", approve))
-    telegram_app.add_handler(CommandHandler("broadcast", broadcast_credits))
+    telegram_app.add_handler(CommandHandler("freecredits", free_credits))
+    telegram_app.add_handler(CommandHandler("stats", stats))
     telegram_app.add_handler(CallbackQueryHandler(button))
     telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     admin_user = get_user(ADMIN_ID)
     if not admin_user:
-        create_user(ADMIN_ID, "admin", "System Administrator")
-        update_balance(ADMIN_ID, 1000)
+        create_user(ADMIN_ID, "admin", "Admin")
+        update_credits(ADMIN_ID, 100)
 
-    logger.info("🛡️ Premium OSINT Intelligence Platform Initialized")
+    logger.info("🔍 Phone & Email Search Bot Started")
 
     try:
         telegram_loop = start_telegram_background(telegram_app)
         port = int(os.environ.get("PORT", 10000))
         app.run(host="0.0.0.0", port=port, debug=False)
     except Exception as e:
-        logger.error(f"System initialization failed: {e}")
+        logger.error(f"Startup failed: {e}")
         raise
 
 if __name__ == "__main__":
