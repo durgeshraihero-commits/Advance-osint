@@ -72,18 +72,6 @@ def init_db():
     conn = sqlite3.connect('user_data.db', check_same_thread=False)
     cursor = conn.cursor()
     
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            user_id INTEGER PRIMARY KEY,
-            username TEXT,
-            first_name TEXT,
-            credits INTEGER DEFAULT ?,
-            referral_code TEXT UNIQUE,
-            referred_by INTEGER,
-            join_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            total_searches INTEGER DEFAULT 0
-        )
-    ''', (WELCOME_BONUS,))
     # The above parameterized create is fine; if the sqlite driver rejects param in DDL, fallback:
     try:
         conn.commit()
@@ -96,7 +84,18 @@ def init_db():
                 username TEXT,
                 first_name TEXT,
                 credits INTEGER DEFAULT 2,
-                referral_code TEXT UNIQUE,
+                referral_code TEXT UNIQUE,cursor.execute(f'''
+    CREATE TABLE IF NOT EXISTS users (
+        user_id INTEGER PRIMARY KEY,
+        username TEXT,
+        first_name TEXT,
+        credits INTEGER DEFAULT {WELCOME_BONUS},
+        referral_code TEXT UNIQUE,
+        referred_by INTEGER,
+        join_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        total_searches INTEGER DEFAULT 0
+    )
+''')
                 referred_by INTEGER,
                 join_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 total_searches INTEGER DEFAULT 0
