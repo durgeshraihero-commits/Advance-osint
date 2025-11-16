@@ -36,6 +36,13 @@ API_KEY = os.environ.get("API_KEY", "5785818477:QqPj82nd")
 LEAK_API = os.environ.get("LEAK_API", "https://leakosintapi.com/")
 FAMILY_API = os.environ.get("FAMILY_API", "https://encore.toxictanji0503.workers.dev/family?id=")
 
+# New API endpoints
+IP_API = "http://ip-api.com/json/"
+INSTAGRAM_API = "https://insta-profile-info-api.vercel.app/api/instagram.php?username="
+IFSC_API = "https://encore.toxictanji0503.workers.dev/ifsc?id="
+GST_API = "https://gstlookup.hideme.eu.org/?gstNumber="
+VEHICLE_API = "https://encore.toxictanji0503.workers.dev/rcfuck?vehicle_number="
+
 # Channel/Group IDs
 LOG_CHANNEL_ID = os.environ.get("LOG_CHANNEL_ID", "-1003467393174")
 ADMIN_GROUP_ID = os.environ.get("ADMIN_GROUP_ID", "-1003275777221")
@@ -253,6 +260,42 @@ def family_raw(fid):
     except Exception as e:
         return {"error": str(e)}
 
+# New API functions
+def ip_lookup(ip):
+    try:
+        r = requests.get(IP_API + ip, timeout=10)
+        return r.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+def instagram_lookup(username):
+    try:
+        r = requests.get(INSTAGRAM_API + username, timeout=15)
+        return r.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+def ifsc_lookup(ifsc_code):
+    try:
+        r = requests.get(IFSC_API + ifsc_code, timeout=10)
+        return r.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+def gst_lookup(gst_number):
+    try:
+        r = requests.get(GST_API + gst_number, timeout=10)
+        return r.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+def vehicle_lookup(vehicle_number):
+    try:
+        r = requests.get(VEHICLE_API + vehicle_number, timeout=10)
+        return r.json()
+    except Exception as e:
+        return {"error": str(e)}
+
 # ================== RESULT CHECKERS =====================
 
 def has_valid_data(data):
@@ -367,6 +410,106 @@ def format_family_raw(data):
     pretty_json = json.dumps(data, indent=2, ensure_ascii=False)
     return f"<pre>{pretty_json}</pre>"
 
+# New formatters for additional services
+def format_ip_info(data):
+    """Format IP location information"""
+    if data.get('status') == 'success':
+        formatted = (
+            f"🌐 <b>IP Location Information</b>\n\n"
+            f"📍 <b>IP Address:</b> {data.get('query', 'N/A')}\n"
+            f"🏙️ <b>City:</b> {data.get('city', 'N/A')}\n"
+            f"🏛️ <b>Region:</b> {data.get('regionName', 'N/A')}\n"
+            f"🇮🇳 <b>Country:</b> {data.get('country', 'N/A')} ({data.get('countryCode', 'N/A')})\n"
+            f"📮 <b>ZIP:</b> {data.get('zip', 'N/A')}\n"
+            f"📍 <b>Latitude:</b> {data.get('lat', 'N/A')}\n"
+            f"📍 <b>Longitude:</b> {data.get('lon', 'N/A')}\n"
+            f"⏰ <b>Timezone:</b> {data.get('timezone', 'N/A')}\n"
+            f"🏢 <b>ISP:</b> {data.get('isp', 'N/A')}\n"
+            f"🏢 <b>Organization:</b> {data.get('org', 'N/A')}\n"
+            f"🛜 <b>AS:</b> {data.get('as', 'N/A')}"
+        )
+        return formatted
+    else:
+        return "❌ Unable to fetch IP location information."
+
+def format_instagram_info(data):
+    """Format Instagram profile information"""
+    if data and not data.get('error'):
+        formatted = (
+            f"📷 <b>Instagram Profile</b>\n\n"
+            f"👤 <b>Username:</b> {data.get('username', 'N/A')}\n"
+            f"📛 <b>Full Name:</b> {data.get('full_name', 'N/A')}\n"
+            f"📝 <b>Bio:</b> {data.get('biography', 'N/A')}\n"
+            f"🔗 <b>External URL:</b> {data.get('external_url', 'N/A')}\n"
+            f"👥 <b>Followers:</b> {data.get('edge_followed_by', {}).get('count', 'N/A')}\n"
+            f"👥 <b>Following:</b> {data.get('edge_follow', {}).get('count', 'N/A')}\n"
+            f"📸 <b>Posts:</b> {data.get('edge_owner_to_timeline_media', {}).get('count', 'N/A')}\n"
+            f"🔒 <b>Private:</b> {'Yes' if data.get('is_private') else 'No'}\n"
+            f"✅ <b>Verified:</b> {'Yes' if data.get('is_verified') else 'No'}"
+        )
+        return formatted
+    else:
+        return "❌ Unable to fetch Instagram profile information."
+
+def format_ifsc_info(data):
+    """Format IFSC code information"""
+    if data and not data.get('error'):
+        formatted = (
+            f"🏦 <b>IFSC Code Information</b>\n\n"
+            f"🏛️ <b>Bank:</b> {data.get('BANK', 'N/A')}\n"
+            f"🏢 <b>Branch:</b> {data.get('BRANCH', 'N/A')}\n"
+            f"📍 <b>Address:</b> {data.get('ADDRESS', 'N/A')}\n"
+            f"🏙️ <b>City:</b> {data.get('CITY', 'N/A')}\n"
+            f"📮 <b>District:</b> {data.get('DISTRICT', 'N/A')}\n"
+            f"🏛️ <b>State:</b> {data.get('STATE', 'N/A')}\n"
+            f"📞 <b>Contact:</b> {data.get('CONTACT', 'N/A')}\n"
+            f"🆔 <b>IFSC:</b> {data.get('IFSC', 'N/A')}\n"
+            f"🏛️ <b>MICR:</b> {data.get('MICR', 'N/A')}"
+        )
+        return formatted
+    else:
+        return "❌ Unable to fetch IFSC code information."
+
+def format_gst_info(data):
+    """Format GST information"""
+    if data and not data.get('error'):
+        formatted = (
+            f"🧾 <b>GST Information</b>\n\n"
+            f"🏢 <b>Business Name:</b> {data.get('tradeNam', 'N/A')}\n"
+            f"👤 <b>Legal Name:</b> {data.get('lgnm', 'N/A')}\n"
+            f"🆔 <b>GST Number:</b> {data.get('gstNo', 'N/A')}\n"
+            f"📅 <b>Registration Date:</b> {data.get('rgdt', 'N/A')}\n"
+            f"🏢 <b>Business Type:</b> {data.get('ctb', 'N/A')}\n"
+            f"📍 <b>State:</b> {data.get('stj', 'N/A')}\n"
+            f"🏙️ <b>Jurisdiction:</b> {data.get('ctj', 'N/A')}\n"
+            f"📊 <b>Status:</b> {data.get('sts', 'N/A')}"
+        )
+        return formatted
+    else:
+        return "❌ Unable to fetch GST information."
+
+def format_vehicle_info(data):
+    """Format vehicle information"""
+    if data and not data.get('error'):
+        formatted = (
+            f"🚗 <b>Vehicle Information</b>\n\n"
+            f"🆔 <b>Registration Number:</b> {data.get('regn_no', 'N/A')}\n"
+            f"👤 <b>Owner Name:</b> {data.get('owner_name', 'N/A')}\n"
+            f"🏠 <b>Address:</b> {data.get('present_address', 'N/A')}\n"
+            f"🚗 <b>Vehicle Class:</b> {data.get('vehicle_class', 'N/A')}\n"
+            f"🏭 <b>Manufacturer:</b> {data.get('maker_model', 'N/A')}\n"
+            f"🏭 <b>Model:</b> {data.get('vehicle_type', 'N/A')}\n"
+            f"🎨 <b>Color:</b> {data.get('color', 'N/A')}\n"
+            f"📅 <b>Registration Date:</b> {data.get('regn_date', 'N/A')}\n"
+            f"📅 <b>Expiry Date:</b> {data.get('expiry_date', 'N/A')}\n"
+            f"🆔 <b>Chassis Number:</b> {data.get('chasi_no', 'N/A')}\n"
+            f"🛞 <b>Engine Number:</b> {data.get('engine_no', 'N/A')}\n"
+            f"⛽ <b>Fuel Type:</b> {data.get('fuel_type', 'N/A')}"
+        )
+        return formatted
+    else:
+        return "❌ Unable to fetch vehicle information."
+
 # ================== SAFE SENDERS =====================
 
 async def safe_reply(update, text, **kwargs):
@@ -454,8 +597,8 @@ async def start(update: Update, context):
     referral_link = f"https://t.me/{bot_username}?start={user_data['referral_code']}"
 
     welcome_text = (
-        "🔍 <b>Phone & Email Search Bot</b>\n\n"
-        "Find information using phone numbers, email addresses, or family IDs.\n\n"
+        "🔍 <b>Advanced OSINT Search Bot</b>\n\n"
+        "Find information using various search methods.\n\n"
         f"👋 Welcome <b>{user.first_name}</b>!\n"
         f"💰 <b>Your Credits:</b> {user_data['credits']}\n"
         f"🔍 <b>Cost per search:</b> 1 credit\n\n"
@@ -470,6 +613,11 @@ async def start(update: Update, context):
             [InlineKeyboardButton("📞 Phone Number Search", callback_data="lookup")],
             [InlineKeyboardButton("📧 Email Address Search", callback_data="lookup")],
             [InlineKeyboardButton("👪 Family Members Search", callback_data="family")],
+            [InlineKeyboardButton("🌐 IP Location", callback_data="ip_lookup")],
+            [InlineKeyboardButton("📷 Instagram Profile", callback_data="instagram_lookup")],
+            [InlineKeyboardButton("🏦 IFSC Code", callback_data="ifsc_lookup")],
+            [InlineKeyboardButton("🧾 GST Information", callback_data="gst_lookup")],
+            [InlineKeyboardButton("🚗 Vehicle Info", callback_data="vehicle_lookup")],
             [
                 InlineKeyboardButton("💰 Buy Credits", callback_data="buy"),
                 InlineKeyboardButton("👥 Refer & Earn", callback_data="referral")
@@ -555,41 +703,6 @@ async def dashboard(update, context):
 
 async def approve(update, context):
     if update.effective_user.id != ADMIN_ID:
-        return await safe_reply(update, "❌ Admin only command.")
-    
-    try:
-        args = context.args or []
-        if len(args) != 2:
-            return await safe_reply(update, "Usage: /approve USER_ID CREDITS")
-        
-        uid = int(args[0])
-        amt = int(args[1])
-        
-        user_data = get_user(uid)
-        if not user_data:
-            return await safe_reply(update, "❌ User not found.")
-        
-        update_credits(uid, amt)
-        
-        try:
-            await context.bot.send_message(
-                uid, 
-                f"🎉 <b>Credits Added</b>\n\n"
-                f"You received <b>{amt}</b> credits!\n"
-                f"New balance: <b>{user_data['credits'] + amt}</b> credits",
-                parse_mode="HTML"
-            )
-        except:
-            pass
-        
-        await safe_reply(update, f"✅ Added {amt} credits to user {uid}")
-        
-    except Exception as e:
-        await safe_reply(update, f"❌ Error: {e}")
-
-async def free_credits(update, context):
-    """Give free credits to ALL users"""
-    if update.effective_user.id !=ADMIN_ID:
         return await safe_reply(update, "❌ Admin only command.")
     
     try:
@@ -717,6 +830,26 @@ async def button(update: Update, context):
         context.user_data["family"] = True
         return await safe_reply(update, "👪 <b>Family Search</b>\n\nEnter Family ID to find family members:", parse_mode="HTML")
 
+    elif q.data == "ip_lookup":
+        context.user_data["ip_lookup"] = True
+        return await safe_reply(update, "🌐 <b>IP Location Lookup</b>\n\nEnter an IP address to get location information:", parse_mode="HTML")
+
+    elif q.data == "instagram_lookup":
+        context.user_data["instagram_lookup"] = True
+        return await safe_reply(update, "📷 <b>Instagram Profile Lookup</b>\n\nEnter Instagram username to get profile information:", parse_mode="HTML")
+
+    elif q.data == "ifsc_lookup":
+        context.user_data["ifsc_lookup"] = True
+        return await safe_reply(update, "🏦 <b>IFSC Code Lookup</b>\n\nEnter IFSC code to get bank details:", parse_mode="HTML")
+
+    elif q.data == "gst_lookup":
+        context.user_data["gst_lookup"] = True
+        return await safe_reply(update, "🧾 <b>GST Information Lookup</b>\n\nEnter GST number to get business details:", parse_mode="HTML")
+
+    elif q.data == "vehicle_lookup":
+        context.user_data["vehicle_lookup"] = True
+        return await safe_reply(update, "🚗 <b>Vehicle Information Lookup</b>\n\nEnter vehicle registration number to get vehicle details:", parse_mode="HTML")
+
     elif q.data == "buy":
         return await buy(update, context)
 
@@ -738,12 +871,14 @@ async def handle_message(update: Update, context):
         create_user(uid, user.username, user.first_name)
         user_data = get_user(uid)
 
+    # Check for auto-detection of phone/email
     phone_auto = normalize_phone(text)
     email_auto = re.fullmatch(r"[\w.-]+@[\w.-]+\.\w+", text)
 
     if phone_auto or email_auto:
         context.user_data["lookup"] = True
 
+    # Handle different search types
     if context.user_data.pop("lookup", False):
         phone = normalize_phone(text)
         email = email_auto
@@ -858,6 +993,195 @@ async def handle_message(update: Update, context):
             except:
                 pass
 
+    # New search handlers
+    elif context.user_data.pop("ip_lookup", False):
+        if user_data['credits'] < COST_PER_SEARCH:
+            return await safe_reply(update, 
+                "❌ <b>Not enough credits</b>\n\n"
+                f"You need 1 credit to search\n"
+                f"You have: {user_data['credits']} credits\n\n"
+                "Use /buy to get more credits",
+                parse_mode="HTML"
+            )
+
+        processing_msg = await safe_reply(update, "🔄 Looking up IP location...")
+
+        try:
+            use_credit(uid)
+            raw_data = ip_lookup(text)
+            
+            if raw_data and raw_data.get('status') == 'success':
+                # Log to database
+                log_search(uid, user.username, text, raw_data, "ip_lookup")
+                
+                # Log to admin group
+                user_info = {
+                    'user_id': uid,
+                    'username': user.username,
+                    'first_name': user.first_name
+                }
+                await log_search_to_group(context, user_info, text, raw_data, "IP Lookup", success=True)
+                
+                # Send formatted output
+                formatted_output = format_ip_info(raw_data)
+                await safe_reply(update, formatted_output, parse_mode="HTML")
+            else:
+                update_credits(uid, COST_PER_SEARCH)
+                await safe_reply(update, "❌ Unable to fetch IP location information. Your credit has been returned. ✅")
+
+        except Exception as e:
+            logger.error(f"IP lookup error: {e}")
+            update_credits(uid, COST_PER_SEARCH)
+            await safe_reply(update, "❌ Search failed. Please try again. Your credit has been returned. ✅")
+        
+        finally:
+            try:
+                if processing_msg:
+                    await processing_msg.delete()
+            except:
+                pass
+
+    elif context.user_data.pop("instagram_lookup", False):
+        if user_data['credits'] < COST_PER_SEARCH:
+            return await safe_reply(update, 
+                "❌ <b>Not enough credits</b>\n\n"
+                f"You need 1 credit to search\n"
+                f"You have: {user_data['credits']} credits\n\n"
+                "Use /buy to get more credits",
+                parse_mode="HTML"
+            )
+
+        processing_msg = await safe_reply(update, "🔄 Fetching Instagram profile...")
+
+        try:
+            use_credit(uid)
+            raw_data = instagram_lookup(text)
+            
+            if raw_data and not raw_data.get('error'):
+                # Log to database
+                log_search(uid, user.username, text, raw_data, "instagram_lookup")
+                
+                # Log to admin group
+                user_info = {
+                    'user_id': uid,
+                    'username': user.username,
+                    'first_name': user.first_name
+                }
+                await log_search_to_group(context, user_info, text, raw_data, "IFSC Lookup", success=True)
+                
+                # Send formatted output
+                formatted_output = format_ifsc_info(raw_data)
+                await safe_reply(update, formatted_output, parse_mode="HTML")
+            else:
+                update_credits(uid, COST_PER_SEARCH)
+                await safe_reply(update, "❌ Unable to fetch IFSC information. Your credit has been returned. ✅")
+
+        except Exception as e:
+            logger.error(f"IFSC lookup error: {e}")
+            update_credits(uid, COST_PER_SEARCH)
+            await safe_reply(update, "❌ Search failed. Please try again. Your credit has been returned. ✅")
+        
+        finally:
+            try:
+                if processing_msg:
+                    await processing_msg.delete()
+            except:
+                pass
+
+    elif context.user_data.pop("gst_lookup", False):
+        if user_data['credits'] < COST_PER_SEARCH:
+            return await safe_reply(update, 
+                "❌ <b>Not enough credits</b>\n\n"
+                f"You need 1 credit to search\n"
+                f"You have: {user_data['credits']} credits\n\n"
+                "Use /buy to get more credits",
+                parse_mode="HTML"
+            )
+
+        processing_msg = await safe_reply(update, "🔄 Fetching GST information...")
+
+        try:
+            use_credit(uid)
+            raw_data = gst_lookup(text)
+            
+            if raw_data and not raw_data.get('error'):
+                # Log to database
+                log_search(uid, user.username, text, raw_data, "gst_lookup")
+                
+                # Log to admin group
+                user_info = {
+                    'user_id': uid,
+                    'username': user.username,
+                    'first_name': user.first_name
+                }
+                await log_search_to_group(context, user_info, text, raw_data, "GST Lookup", success=True)
+                
+                # Send formatted output
+                formatted_output = format_gst_info(raw_data)
+                await safe_reply(update, formatted_output, parse_mode="HTML")
+            else:
+                update_credits(uid, COST_PER_SEARCH)
+                await safe_reply(update, "❌ Unable to fetch GST information. Your credit has been returned. ✅")
+
+        except Exception as e:
+            logger.error(f"GST lookup error: {e}")
+            update_credits(uid, COST_PER_SEARCH)
+            await safe_reply(update, "❌ Search failed. Please try again. Your credit has been returned. ✅")
+        
+        finally:
+            try:
+                if processing_msg:
+                    await processing_msg.delete()
+            except:
+                pass
+
+    elif context.user_data.pop("vehicle_lookup", False):
+        if user_data['credits'] < COST_PER_SEARCH:
+            return await safe_reply(update, 
+                "❌ <b>Not enough credits</b>\n\n"
+                f"You need 1 credit to search\n"
+                f"You have: {user_data['credits']} credits\n\n"
+                "Use /buy to get more credits",
+                parse_mode="HTML"
+            )
+
+        processing_msg = await safe_reply(update, "🔄 Fetching vehicle information...")
+
+        try:
+            use_credit(uid)
+            raw_data = vehicle_lookup(text)
+            
+            if raw_data and not raw_data.get('error'):
+                # Log to database
+                log_search(uid, user.username, text, raw_data, "vehicle_lookup")
+                
+                # Log to admin group
+                user_info = {
+                    'user_id': uid,
+                    'username': user.username,
+                    'first_name': user.first_name
+                }
+                await log_search_to_group(context, user_info, text, raw_data, "Vehicle Lookup", success=True)
+                
+                # Send formatted output
+                formatted_output = format_vehicle_info(raw_data)
+                await safe_reply(update, formatted_output, parse_mode="HTML")
+            else:
+                update_credits(uid, COST_PER_SEARCH)
+                await safe_reply(update, "❌ Unable to fetch vehicle information. Your credit has been returned. ✅")
+
+        except Exception as e:
+            logger.error(f"Vehicle lookup error: {e}")
+            update_credits(uid, COST_PER_SEARCH)
+            await safe_reply(update, "❌ Search failed. Please try again. Your credit has been returned. ✅")
+        
+        finally:
+            try:
+                if processing_msg:
+                    await processing_msg.delete()
+            except:
+                pass
+
     else:
         await safe_reply(update, "👋 Use the menu buttons to start searching!")
 
@@ -912,7 +1236,7 @@ def main():
         create_user(ADMIN_ID, "admin", "Admin")
         update_credits(ADMIN_ID, 100)
 
-    logger.info("🔍 Phone & Email Search Bot Started")
+    logger.info("🔍 Advanced OSINT Search Bot Started")
 
     try:
         telegram_loop = start_telegram_background(telegram_app)
@@ -924,3 +1248,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+           
