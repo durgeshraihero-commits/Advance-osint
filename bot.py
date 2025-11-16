@@ -306,6 +306,21 @@ def filter_no_results(data):
     
     return data
 
+def remove_infoleak(data):
+    """Remove InfoLeak field from the data"""
+    if not data or not data.get('List'):
+        return data
+    
+    cleaned_data = data.copy()
+    
+    # Remove InfoLeak from each database entry
+    if 'List' in cleaned_data:
+        for db_name, db_data in cleaned_data['List'].items():
+            if 'InfoLeak' in db_data:
+                del db_data['InfoLeak']
+    
+    return cleaned_data
+
 # ================== SIMPLE FORMATTERS =====================
 
 def swap_father_fullname(data):
@@ -336,9 +351,11 @@ def swap_father_fullname(data):
         return data
 
 def format_raw_output(data):
-    """Format raw API output with FatherName/FullName swap"""
-    # First swap the names
-    swapped_data = swap_father_fullname(data)
+    """Format raw API output with FatherName/FullName swap and InfoLeak removed"""
+    # First remove InfoLeak
+    cleaned_data = remove_infoleak(data)
+    # Then swap the names
+    swapped_data = swap_father_fullname(cleaned_data)
     
     # Convert to pretty JSON
     pretty_json = json.dumps(swapped_data, indent=2, ensure_ascii=False)
@@ -383,9 +400,11 @@ async def log_search_to_group(context, user_info, input_query, output_data, sear
             parse_mode="HTML"
         )
         
-        # Also send the actual output data
+        # Also send the actual output data (with InfoLeak removed)
         if output_data:
-            output_preview = json.dumps(output_data, indent=2, ensure_ascii=False)
+            # Remove InfoLeak before sending to admin group
+            cleaned_output = remove_infoleak(output_data)
+            output_preview = json.dumps(cleaned_output, indent=2, ensure_ascii=False)
             if len(output_preview) > 3000:
                 output_preview = output_preview[:3000] + "..."
             
@@ -568,6 +587,40 @@ async def approve(update, context):
     except Exception as e:
         await safe_reply(update, f"❌ Error: {e}")
 
+async def free_credits(update, context):
+    """Give free credits to ALL users"""
+    if update.effective_user.id !=ADMIN_ID:
+        return await safe_reply(update, "❌ Admin only command.")
+    
+    try:
+        args = context.args or []
+        if len(args) != 2:
+            return await safe_reply(update, "Usage: /approve USER_ID CREDITS")
+        
+        uid = int(args[0])
+        amt = int(args[1])
+        
+        user_data = get_user(uid)
+        if not user_data:
+            return await safe_reply(update, "❌ User not found.")
+        
+        update_credits(uid, amt)
+        
+        try:
+            await context.bot.send_message(
+                uid, 
+                f"🎉 <b>Credits Added</b>\n\n"
+                f"You received <b>{amt}</b> credits!\n"
+                f"New balance: <b>{user_data['credits'] + amt}</b> credits",
+                parse_mode="HTML"
+            )
+        except:
+            pass
+        
+        await safe_reply(update, f"✅ Added {amt} credits to user {uid}")
+        
+    except Exception as e:
+        await safe_reply(update, f"❌ Error: {e}")
 
 async def free_credits(update, context):
     """Give free credits to ALL users"""
@@ -711,14 +764,17 @@ async def handle_message(update: Update, context):
 
         try:
             use_credit(uid)
-            raw = leak_raw(phone if phone else email.group())
+            # SINGLE API CALL - store the result
+            raw_data = leak_raw(phone if phone else email.group())
             
             # Check if we have valid data (not "No results found")
-            if has_valid_data(raw):
-                # Filter out "No results found" entries
-                filtered_data = filter_no_results(raw)
+            if has_valid_data(raw_data):
+                # Filter out "No results found" entries and remove InfoLeak
+                filtered_data = filter_no_results(raw_data)
+                cleaned_data = remove_infoleak(filtered_data)
                 
-                log_search(uid, user.username, text, filtered_data, "lookup")
+                # Log to database
+                log_search(uid, user.username, text, cleaned_data, "lookup")
                 
                 # Log to admin group with full details (only for successful searches)
                 user_info = {
@@ -726,10 +782,10 @@ async def handle_message(update: Update, context):
                     'username': user.username,
                     'first_name': user.first_name
                 }
-                await log_search_to_group(context, user_info, text, filtered_data, "Phone/Email Search", success=True)
+                await log_search_to_group(context, user_info, text, cleaned_data, "Phone/Email Search", success=True)
                 
-                # Send raw output with FatherName/FullName swap
-                formatted_output = format_raw_output(filtered_data)
+                # Send raw output with FatherName/FullName swap and InfoLeak removed
+                formatted_output = format_raw_output(cleaned_data)
                 for chunk_text in chunk(formatted_output, 4000):
                     await safe_reply(update, chunk_text, parse_mode="HTML")
             else:
@@ -764,11 +820,13 @@ async def handle_message(update: Update, context):
 
         try:
             use_credit(uid)
-            raw = family_raw(text)
+            # SINGLE API CALL - store the result
+            raw_data = family_raw(text)
             
             # Check if we have valid family data
-            if raw and "memberDetailsList" in raw and raw["memberDetailsList"]:
-                log_search(uid, user.username, text, raw, "family")
+            if raw_data and "memberDetailsList" in raw_data and raw_data["memberDetailsList"]:
+                # Log to database
+                log_search(uid, user.username, text, raw_data, "family")
 
                 # Log to admin group with full details (only for successful searches)
                 user_info = {
@@ -776,10 +834,10 @@ async def handle_message(update: Update, context):
                     'username': user.username,
                     'first_name': user.first_name
                 }
-                await log_search_to_group(context, user_info, text, raw, "Family Search", success=True)
+                await log_search_to_group(context, user_info, text, raw_data, "Family Search", success=True)
 
                 # Send raw family output
-                formatted_output = format_family_raw(raw)
+                formatted_output = format_family_raw(raw_data)
                 for chunk_text in chunk(formatted_output, 4000):
                     await safe_reply(update, chunk_text, parse_mode="HTML")
             else:
